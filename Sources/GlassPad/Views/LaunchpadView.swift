@@ -2,6 +2,10 @@ import SwiftUI
 
 /// Root overlay view: dimmed/blurred backdrop, a glass search pill, a horizontally
 /// paged item grid, glass page dots, and the morphing folder overlay.
+///
+/// The whole tree lives in one `GlassEffectContainer` so the grid's folder tiles
+/// and the expanded folder panel share a namespace and can morph between each
+/// other. The folder's full-screen dim sits above the chrome but below the panel.
 struct LaunchpadView: View {
     @Bindable var model: LaunchpadModel
     var onDismiss: () -> Void
@@ -11,39 +15,42 @@ struct LaunchpadView: View {
     @Namespace private var glassNamespace
 
     var body: some View {
-        ZStack {
-            backdrop
+        GlassEffectContainer(spacing: Metrics.glassContainerSpacing) {
+            ZStack {
+                backdrop
 
-            VStack(spacing: 0) {
-                SearchPill(query: $model.query, isFocused: $searchFocused)
-                    .padding(.top, Metrics.searchTopPadding)
-                    .padding(.bottom, Metrics.searchBottomPadding)
+                VStack(spacing: 0) {
+                    SearchPill(query: $model.query, isFocused: $searchFocused)
+                        .padding(.top, Metrics.searchTopPadding)
+                        .padding(.bottom, Metrics.searchBottomPadding)
 
-                // The grid's folder tiles and the expanded folder panel share this
-                // container + namespace so the glass can morph between them.
-                GlassEffectContainer(spacing: Metrics.glassContainerSpacing) {
-                    ZStack {
-                        PagedGrid(model: model, namespace: glassNamespace) { app in
-                            launchAndDismiss(app)
-                        }
-
-                        if let folder = model.openFolder {
-                            FolderOverlay(
-                                folder: folder,
-                                apps: model.resolvedApps(in: folder),
-                                namespace: glassNamespace,
-                                onClose: { withAnimation(Metrics.morph) { model.openFolder = nil } },
-                                onLaunch: { app in launchAndDismiss(app) },
-                                onRename: { name in model.renameFolder(folder, to: name) }
-                            )
-                        }
+                    PagedGrid(model: model, namespace: glassNamespace) { app in
+                        launchAndDismiss(app)
                     }
+
+                    PageDots(count: model.pageCount, current: model.currentPage) { page in
+                        model.goToPage(page)
+                    }
+                    .frame(height: Metrics.pageDotsAreaHeight)
                 }
 
-                PageDots(count: model.pageCount, current: model.currentPage) { page in
-                    model.goToPage(page)
+                if let folder = model.openFolder {
+                    // Full-screen dim + click-anywhere-to-close, above the chrome.
+                    Rectangle()
+                        .fill(.black.opacity(Metrics.folderOverlayDim))
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { closeFolder() }
+
+                    // The morph target panel, centered over the whole window.
+                    FolderOverlay(
+                        folder: folder,
+                        apps: model.resolvedApps(in: folder),
+                        namespace: glassNamespace,
+                        onLaunch: { app in launchAndDismiss(app) },
+                        onRename: { name in model.renameFolder(folder, to: name) }
+                    )
                 }
-                .frame(height: Metrics.pageDotsAreaHeight)
             }
         }
         .scaleEffect(appeared ? 1 : Metrics.appearScaleFrom)
@@ -55,6 +62,10 @@ struct LaunchpadView: View {
         .onChange(of: model.query) {
             model.handleQueryChange()
         }
+    }
+
+    private func closeFolder() {
+        withAnimation(Metrics.morph) { model.openFolder = nil }
     }
 
     /// Pop the icon, then dismiss after a beat so the launch animation reads.

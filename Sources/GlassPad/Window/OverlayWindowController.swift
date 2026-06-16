@@ -18,6 +18,13 @@ final class OverlayWindowController {
 
     func show() {
         guard !isVisible else { return }
+        // A previous hide()'s fade-out may still be in flight; drop that window
+        // immediately so we never end up with two overlays (its completion handler
+        // is guarded by identity and won't touch the new window).
+        if let stale = window {
+            stale.orderOut(nil)
+            window = nil
+        }
         let screen = targetScreen()
         let window = makeWindow(on: screen)
         self.window = window
@@ -47,7 +54,9 @@ final class OverlayWindowController {
             // NSAnimationContext invokes completion handlers on the main thread.
             MainActor.assumeIsolated {
                 window.orderOut(nil)
-                self?.window = nil
+                // Only clear the reference if this is still the current window — a
+                // re-summon during the fade-out may have installed a new one.
+                if self?.window === window { self?.window = nil }
             }
         })
     }
@@ -114,7 +123,11 @@ final class OverlayWindowController {
                 withAnimation(Metrics.morph) { model.openFolder = nil }
                 return nil
             }
-            // Let letters/Return reach the folder's rename field; swallow arrows.
+            // While the rename field is editing, let arrows move the caret/selection.
+            if let editor = window?.firstResponder as? NSText, editor.isFieldEditor {
+                return event
+            }
+            // Otherwise swallow arrows (no grid nav behind a folder); pass the rest.
             return (123...126).contains(event.keyCode) ? nil : event
         }
 

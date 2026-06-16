@@ -29,10 +29,13 @@ enum AppDiscoveryService {
             ) else { continue }
 
             for url in entries where url.pathExtension == "app" {
-                let path = url.path
-                guard seen.insert(path).inserted else { continue }
+                // De-dupe by the resolved (canonical) path so the same physical
+                // bundle reached via a symlink/alias in two search paths only
+                // appears once — but keep the readable raw path as the stable id.
+                let canonical = url.resolvingSymlinksInPath().standardizedFileURL.path
+                guard seen.insert(canonical).inserted else { continue }
                 let app = InstalledApp(
-                    id: path,
+                    id: url.path,
                     name: displayName(for: url, fileManager: fm),
                     url: url,
                     bundleID: Bundle(url: url)?.bundleIdentifier
