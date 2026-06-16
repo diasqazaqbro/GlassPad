@@ -24,6 +24,17 @@ enum Metrics {
         return max(4, min(9, n))
     }
 
+    /// Rows derived from available height (minus the search and page-dot chrome).
+    static func rowCount(forHeight height: CGFloat) -> Int {
+        let usable = height - searchAreaHeight - pageDotsAreaHeight
+        let perRow = cellHeight + rowSpacing
+        let n = Int((usable / perRow).rounded(.down))
+        return max(2, min(7, n))
+    }
+
+    static var searchAreaHeight: CGFloat { searchTopPadding + searchPillHeight + searchBottomPadding }
+    static let pageDotsAreaHeight: CGFloat = 64
+
     // MARK: - Search pill
     static let searchPillWidth: CGFloat = 360
     static let searchPillHeight: CGFloat = 44
@@ -38,6 +49,7 @@ enum Metrics {
     static let cellCornerRadius: CGFloat = 22
     static let hoverScale: CGFloat = 1.06
     static let hoverHighlightOpacity: Double = 0.14
+    static let selectedHighlightOpacity: Double = 0.20
 
     // MARK: - Motion
     static let pop = Animation.spring(response: 0.3, dampingFraction: 0.8)

@@ -1,13 +1,23 @@
 import SwiftUI
 
 /// A single app tile: icon over a single-line label. Content layer stays
-/// restrained (HIG) — a subtle highlight fades in on hover rather than glass.
+/// restrained (HIG) — a subtle highlight fades in on hover / keyboard selection
+/// rather than glass.
 struct AppCell: View {
     let app: InstalledApp
+    var isSelected: Bool = false
     var onLaunch: () -> Void
 
     @State private var icon: NSImage?
     @State private var hovering = false
+
+    private var highlightOpacity: Double {
+        if isSelected { return Metrics.selectedHighlightOpacity }
+        if hovering { return Metrics.hoverHighlightOpacity }
+        return 0
+    }
+
+    private var emphasized: Bool { isSelected || hovering }
 
     var body: some View {
         Button(action: onLaunch) {
@@ -25,13 +35,13 @@ struct AppCell: View {
             .padding(8)
             .background {
                 RoundedRectangle(cornerRadius: Metrics.cellCornerRadius, style: .continuous)
-                    .fill(.white.opacity(hovering ? Metrics.hoverHighlightOpacity : 0))
+                    .fill(.white.opacity(highlightOpacity))
             }
-            .scaleEffect(hovering ? Metrics.hoverScale : 1)
+            .scaleEffect(emphasized ? Metrics.hoverScale : 1)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(Metrics.pop, value: hovering)
+        .animation(Metrics.pop, value: emphasized)
         .task(id: app.id) {
             icon = await IconLoader.shared.icon(forPath: app.id)
         }

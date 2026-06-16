@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Root overlay view: dimmed/blurred backdrop, a glass search pill, and a fuzzy
-/// filtered grid of apps. Fades+scales in on appear; clicking a cell launches
-/// and dismisses.
+/// Root overlay view: dimmed/blurred backdrop, a glass search pill, a horizontally
+/// paged app grid, and glass page dots. Fades+scales in on appear.
 struct LaunchpadView: View {
     @Bindable var model: LaunchpadModel
     var onDismiss: () -> Void
@@ -13,7 +12,21 @@ struct LaunchpadView: View {
     var body: some View {
         ZStack {
             backdrop
-            content
+            VStack(spacing: 0) {
+                SearchPill(query: $model.query, isFocused: $searchFocused)
+                    .padding(.top, Metrics.searchTopPadding)
+                    .padding(.bottom, Metrics.searchBottomPadding)
+
+                PagedGrid(model: model) { app in
+                    model.launch(app)
+                    onDismiss()
+                }
+
+                PageDots(count: model.pageCount, current: model.currentPage) { page in
+                    model.goToPage(page)
+                }
+                .frame(height: Metrics.pageDotsAreaHeight)
+            }
         }
         .scaleEffect(appeared ? 1 : Metrics.appearScaleFrom)
         .onAppear {
@@ -21,38 +34,9 @@ struct LaunchpadView: View {
             // Defer one runloop tick so the field is in the hierarchy first.
             DispatchQueue.main.async { searchFocused = true }
         }
-    }
-
-    private var content: some View {
-        GeometryReader { geo in
-            let columnCount = Metrics.columnCount(forWidth: geo.size.width)
-            VStack(spacing: 0) {
-                SearchPill(query: $model.query, isFocused: $searchFocused)
-                    .padding(.top, Metrics.searchTopPadding)
-                    .padding(.bottom, Metrics.searchBottomPadding)
-
-                ScrollView {
-                    LazyVGrid(columns: columns(columnCount), spacing: Metrics.rowSpacing) {
-                        ForEach(model.filteredApps) { app in
-                            AppCell(app: app) {
-                                model.launch(app)
-                                onDismiss()
-                            }
-                        }
-                    }
-                    .padding(.horizontal, Metrics.gridHorizontalMargin)
-                    .padding(.bottom, Metrics.gridBottomInset)
-                }
-                .scrollClipDisabled()
-            }
+        .onChange(of: model.query) {
+            model.handleQueryChange()
         }
-    }
-
-    private func columns(_ count: Int) -> [GridItem] {
-        Array(
-            repeating: GridItem(.flexible(), spacing: Metrics.columnSpacing, alignment: .top),
-            count: count
-        )
     }
 
     /// The blurred desktop the glass refracts. The material samples the window

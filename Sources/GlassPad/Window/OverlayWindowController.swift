@@ -7,6 +7,7 @@ import SwiftUI
 final class OverlayWindowController {
     private let model: LaunchpadModel
     private var window: KeyableWindow?
+    private var keyMonitor: Any?
     private(set) var isVisible = false
 
     init(model: LaunchpadModel) {
@@ -26,18 +27,20 @@ final class OverlayWindowController {
         window.makeKeyAndOrderFront(nil)
 
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
+            ctx.duration = Metrics.overlayFadeIn
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
+        installKeyMonitor()
         isVisible = true
     }
 
     func hide() {
         guard isVisible, let window else { return }
         isVisible = false
+        removeKeyMonitor()
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.14
+            ctx.duration = Metrics.overlayFadeOut
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             window.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
@@ -82,5 +85,42 @@ final class OverlayWindowController {
 
         window.onCancel = { [weak self] in self?.hide() }
         return window
+    }
+
+    // MARK: - Keyboard
+
+    /// While visible, intercept navigation keys (arrows, Return, Esc) and route
+    /// them to the model. Other keys (letters) fall through to the search field.
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return self.handleKeyDown(event)
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+    }
+
+    /// Returns nil to consume the event, or the event to pass it through.
+    private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        switch event.keyCode {
+        case 53: // Esc
+            hide()
+            return nil
+        case 123: model.move(.left);  return nil
+        case 124: model.move(.right); return nil
+        case 125: model.move(.down);  return nil
+        case 126: model.move(.up);    return nil
+        case 36, 76: // Return / keypad Enter
+            if model.launchSelected() { hide() }
+            return nil
+        default:
+            return event // letters etc. reach the focused search field
+        }
     }
 }
