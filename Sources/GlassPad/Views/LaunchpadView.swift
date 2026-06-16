@@ -1,31 +1,36 @@
 import SwiftUI
 
-/// Phase 0 placeholder: a dimmed, blurred backdrop over the live desktop with a
-/// centered identity card. Esc (handled by the window) or a click dismisses it.
+/// Root overlay view: dimmed/blurred backdrop behind a scrolling grid of apps.
+/// Phase 1 renders a plain `LazyVGrid`; clicking a cell launches and dismisses.
 struct LaunchpadView: View {
+    let model: LaunchpadModel
     var onDismiss: () -> Void
+
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: 24, alignment: .top),
+        count: 7
+    )
 
     var body: some View {
         ZStack {
             backdrop
-            VStack(spacing: 12) {
-                Image(systemName: "square.grid.3x3.fill")
-                    .font(.system(size: 64, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.92))
-                Text("GlassPad")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text("Phase 0 — press Esc or click to dismiss")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.7))
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 28) {
+                    ForEach(model.apps) { app in
+                        AppCell(app: app) {
+                            model.launch(app)
+                            onDismiss()
+                        }
+                    }
+                }
+                .padding(.horizontal, 64)
+                .padding(.vertical, 48)
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture { onDismiss() }
     }
 
     /// The blurred desktop the glass will later refract. The material samples the
-    /// window backdrop (the live desktop), and the black tint dims it.
+    /// window backdrop (the live desktop); the black tint dims it.
     private var backdrop: some View {
         ZStack {
             Rectangle().fill(.ultraThinMaterial)

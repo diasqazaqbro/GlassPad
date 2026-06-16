@@ -3,12 +3,14 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private let overlay = OverlayWindowController()
+    private let model = LaunchpadModel()
+    private lazy var overlay = OverlayWindowController(model: model)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Background utility: no Dock icon, lives in the menu bar.
         NSApp.setActivationPolicy(.accessory)
         setUpStatusItem()
+        model.loadApps()
     }
 
     // MARK: - Menu-bar item

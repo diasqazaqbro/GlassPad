@@ -5,8 +5,13 @@ import SwiftUI
 /// The window hosts the SwiftUI `LaunchpadView` via `NSHostingView`.
 @MainActor
 final class OverlayWindowController {
+    private let model: LaunchpadModel
     private var window: KeyableWindow?
     private(set) var isVisible = false
+
+    init(model: LaunchpadModel) {
+        self.model = model
+    }
 
     func toggle() { isVisible ? hide() : show() }
 
@@ -70,7 +75,7 @@ final class OverlayWindowController {
         window.isReleasedWhenClosed = false
         window.setFrame(screen.frame, display: true)
 
-        let root = LaunchpadView(onDismiss: { [weak self] in self?.hide() })
+        let root = LaunchpadView(model: model, onDismiss: { [weak self] in self?.hide() })
         let host = NSHostingView(rootView: root)
         host.frame = window.contentLayoutRect
         window.contentView = host
