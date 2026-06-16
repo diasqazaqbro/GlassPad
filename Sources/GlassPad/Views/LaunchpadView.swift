@@ -1,40 +1,66 @@
 import SwiftUI
 
-/// Root overlay view: dimmed/blurred backdrop behind a scrolling grid of apps.
-/// Phase 1 renders a plain `LazyVGrid`; clicking a cell launches and dismisses.
+/// Root overlay view: dimmed/blurred backdrop, a glass search pill, and a fuzzy
+/// filtered grid of apps. Fades+scales in on appear; clicking a cell launches
+/// and dismisses.
 struct LaunchpadView: View {
-    let model: LaunchpadModel
+    @Bindable var model: LaunchpadModel
     var onDismiss: () -> Void
 
-    private let columns = Array(
-        repeating: GridItem(.flexible(), spacing: 24, alignment: .top),
-        count: 7
-    )
+    @FocusState private var searchFocused: Bool
+    @State private var appeared = false
 
     var body: some View {
         ZStack {
             backdrop
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 28) {
-                    ForEach(model.apps) { app in
-                        AppCell(app: app) {
-                            model.launch(app)
-                            onDismiss()
+            content
+        }
+        .scaleEffect(appeared ? 1 : Metrics.appearScaleFrom)
+        .onAppear {
+            withAnimation(Metrics.pop) { appeared = true }
+            // Defer one runloop tick so the field is in the hierarchy first.
+            DispatchQueue.main.async { searchFocused = true }
+        }
+    }
+
+    private var content: some View {
+        GeometryReader { geo in
+            let columnCount = Metrics.columnCount(forWidth: geo.size.width)
+            VStack(spacing: 0) {
+                SearchPill(query: $model.query, isFocused: $searchFocused)
+                    .padding(.top, Metrics.searchTopPadding)
+                    .padding(.bottom, Metrics.searchBottomPadding)
+
+                ScrollView {
+                    LazyVGrid(columns: columns(columnCount), spacing: Metrics.rowSpacing) {
+                        ForEach(model.filteredApps) { app in
+                            AppCell(app: app) {
+                                model.launch(app)
+                                onDismiss()
+                            }
                         }
                     }
+                    .padding(.horizontal, Metrics.gridHorizontalMargin)
+                    .padding(.bottom, Metrics.gridBottomInset)
                 }
-                .padding(.horizontal, 64)
-                .padding(.vertical, 48)
+                .scrollClipDisabled()
             }
         }
     }
 
-    /// The blurred desktop the glass will later refract. The material samples the
-    /// window backdrop (the live desktop); the black tint dims it.
+    private func columns(_ count: Int) -> [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: Metrics.columnSpacing, alignment: .top),
+            count: count
+        )
+    }
+
+    /// The blurred desktop the glass refracts. The material samples the window
+    /// backdrop (the live desktop); the black tint dims it.
     private var backdrop: some View {
         ZStack {
             Rectangle().fill(.ultraThinMaterial)
-            Rectangle().fill(.black.opacity(0.22))
+            Rectangle().fill(.black.opacity(Metrics.backdropDim))
         }
         .ignoresSafeArea()
     }

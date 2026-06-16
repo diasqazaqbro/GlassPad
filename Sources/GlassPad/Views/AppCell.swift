@@ -1,28 +1,37 @@
 import SwiftUI
 
-/// A single app tile: icon over a single-line label. Phase 1 is plain (no glass);
-/// hover/glass treatment arrives in Phase 2.
+/// A single app tile: icon over a single-line label. Content layer stays
+/// restrained (HIG) — a subtle highlight fades in on hover rather than glass.
 struct AppCell: View {
     let app: InstalledApp
     var onLaunch: () -> Void
 
     @State private var icon: NSImage?
+    @State private var hovering = false
 
     var body: some View {
         Button(action: onLaunch) {
             VStack(spacing: 8) {
                 iconView
-                    .frame(width: 96, height: 96)
+                    .frame(width: Metrics.iconSize, height: Metrics.iconSize)
                 Text(app.name)
-                    .font(.system(size: 13))
+                    .font(.system(size: Metrics.labelFontSize))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
-                    .frame(maxWidth: 110)
+                    .frame(maxWidth: Metrics.labelMaxWidth)
             }
+            .padding(8)
+            .background {
+                RoundedRectangle(cornerRadius: Metrics.cellCornerRadius, style: .continuous)
+                    .fill(.white.opacity(hovering ? Metrics.hoverHighlightOpacity : 0))
+            }
+            .scaleEffect(hovering ? Metrics.hoverScale : 1)
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(Metrics.pop, value: hovering)
         .task(id: app.id) {
             icon = await IconLoader.shared.icon(forPath: app.id)
         }
