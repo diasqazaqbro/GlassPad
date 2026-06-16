@@ -25,6 +25,9 @@ final class LaunchpadModel {
     /// The folder currently expanded in the morph overlay (nil = none).
     var openFolder: Folder?
 
+    /// The item id currently "popping" as it launches (for the launch animation).
+    var launchingItemID: String?
+
     // Grid geometry, set by the view from the available size.
     private(set) var columns = Metrics.preferredColumns
     private(set) var rows = Metrics.preferredRows
@@ -201,7 +204,13 @@ final class LaunchpadModel {
     }
 
     func launch(_ app: InstalledApp) {
+        withAnimation(Metrics.pop) { launchingItemID = LaunchpadItem.appItemID(app.id) }
         LaunchService.launch(app)
+    }
+
+    /// Clear transient UI state when the overlay (re)appears.
+    func resetTransientState() {
+        launchingItemID = nil
     }
 
     // MARK: - Drag & drop (reorder / folders)

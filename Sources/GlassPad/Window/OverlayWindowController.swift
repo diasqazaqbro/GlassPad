@@ -127,7 +127,12 @@ final class OverlayWindowController {
         case 125: model.move(.down);  return nil
         case 126: model.move(.up);    return nil
         case 36, 76: // Return / keypad Enter
-            if model.activateSelected() { hide() }
+            if model.activateSelected() {
+                // Delay so the launch pop is visible before the overlay closes.
+                DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.launchDismissDelay) { [weak self] in
+                    self?.hide()
+                }
+            }
             return nil
         default:
             return event // letters etc. reach the focused search field

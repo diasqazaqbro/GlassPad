@@ -65,4 +65,6 @@ enum Metrics {
     static let overlayFadeIn: TimeInterval = 0.18
     static let overlayFadeOut: TimeInterval = 0.14
     static let appearScaleFrom: CGFloat = 0.96
+    static let launchPopScale: CGFloat = 1.22
+    static let launchDismissDelay: TimeInterval = 0.13
 }

@@ -24,8 +24,7 @@ struct LaunchpadView: View {
                 GlassEffectContainer(spacing: Metrics.glassContainerSpacing) {
                     ZStack {
                         PagedGrid(model: model, namespace: glassNamespace) { app in
-                            model.launch(app)
-                            onDismiss()
+                            launchAndDismiss(app)
                         }
 
                         if let folder = model.openFolder {
@@ -34,7 +33,7 @@ struct LaunchpadView: View {
                                 apps: model.resolvedApps(in: folder),
                                 namespace: glassNamespace,
                                 onClose: { withAnimation(Metrics.morph) { model.openFolder = nil } },
-                                onLaunch: { app in model.launch(app); onDismiss() },
+                                onLaunch: { app in launchAndDismiss(app) },
                                 onRename: { name in model.renameFolder(folder, to: name) }
                             )
                         }
@@ -49,11 +48,20 @@ struct LaunchpadView: View {
         }
         .scaleEffect(appeared ? 1 : Metrics.appearScaleFrom)
         .onAppear {
+            model.resetTransientState()
             withAnimation(Metrics.pop) { appeared = true }
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: model.query) {
             model.handleQueryChange()
+        }
+    }
+
+    /// Pop the icon, then dismiss after a beat so the launch animation reads.
+    private func launchAndDismiss(_ app: InstalledApp) {
+        model.launch(app)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.launchDismissDelay) {
+            onDismiss()
         }
     }
 

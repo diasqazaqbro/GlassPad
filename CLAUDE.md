@@ -25,4 +25,6 @@ Services produce data → `LaunchpadModel` (`@Observable`) holds it → SwiftUI 
 One commit per phase, conventional-commit messages. Each phase must build, run, and be visually verifiable.
 
 ## Current status
-- Phase 0 — Skeleton: ✅ done.
+All build phases complete (Phase 0–5). `swift build` is clean under Swift 6 strict
+concurrency; `Scripts/make-app-bundle.sh` produces a runnable `dist/GlassPad.app`.
+Dependency: `KeyboardShortcuts` (global hotkey, default ⌥Space, rebindable in Settings).

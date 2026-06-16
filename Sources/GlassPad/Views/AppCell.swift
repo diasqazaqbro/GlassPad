@@ -6,6 +6,7 @@ import SwiftUI
 struct AppCell: View {
     let app: InstalledApp
     var isSelected: Bool = false
+    var isLaunching: Bool = false
     var onLaunch: () -> Void
 
     @State private var icon: NSImage?
@@ -18,6 +19,10 @@ struct AppCell: View {
     }
 
     private var emphasized: Bool { isSelected || hovering }
+    private var scale: CGFloat {
+        if isLaunching { return Metrics.launchPopScale }
+        return emphasized ? Metrics.hoverScale : 1
+    }
 
     var body: some View {
         Button(action: onLaunch) {
@@ -37,11 +42,11 @@ struct AppCell: View {
                 RoundedRectangle(cornerRadius: Metrics.cellCornerRadius, style: .continuous)
                     .fill(.white.opacity(highlightOpacity))
             }
-            .scaleEffect(emphasized ? Metrics.hoverScale : 1)
+            .scaleEffect(scale)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(Metrics.pop, value: emphasized)
+        .animation(Metrics.pop, value: scale)
         .task(id: app.id) {
             icon = await IconLoader.shared.icon(forPath: app.id)
         }

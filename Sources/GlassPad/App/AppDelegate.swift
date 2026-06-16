@@ -5,12 +5,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let model = LaunchpadModel()
     private lazy var overlay = OverlayWindowController(model: model)
+    private let settings = SettingsWindowController()
+    private let watcher = AppDirectoryWatcher()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Background utility: no Dock icon, lives in the menu bar.
         NSApp.setActivationPolicy(.accessory)
         setUpStatusItem()
         model.loadApps()
+        HotkeyManager.register { [weak self] in self?.overlay.toggle() }
+
+        // Live re-scan when apps are installed/removed.
+        watcher.start(paths: AppDiscoveryService.searchPaths.map(\.path)) { [weak self] in
+            self?.model.loadApps()
+        }
     }
 
     // MARK: - Menu-bar item
@@ -42,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let toggle = NSMenuItem(title: "Toggle GlassPad", action: #selector(toggleFromMenu), keyEquivalent: "")
         toggle.target = self
         menu.addItem(toggle)
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit GlassPad", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -53,5 +64,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleFromMenu() { overlay.toggle() }
+    @objc private func openSettings() { settings.show() }
     @objc private func quit() { NSApp.terminate(nil) }
 }

@@ -28,6 +28,11 @@ struct PagedGrid: View {
             .scrollPosition(id: $scrolledPage)
             .scrollIndicators(.hidden)
             .scrollClipDisabled()
+            .overlay {
+                if model.searching && model.displayedItems.isEmpty {
+                    EmptyResultsView(query: model.query)
+                }
+            }
             .onAppear {
                 model.setGrid(columns: cols, rows: rows)
                 scrolledPage = model.currentPage
@@ -95,7 +100,11 @@ private struct ItemCell: View {
     private var content: some View {
         switch item {
         case .app(let app):
-            AppCell(app: app, isSelected: model.selectedItemID == item.id) { onLaunch(app) }
+            AppCell(
+                app: app,
+                isSelected: model.selectedItemID == item.id,
+                isLaunching: model.launchingItemID == item.id
+            ) { onLaunch(app) }
         case .folder(let folder):
             FolderCell(
                 folder: folder,
@@ -134,6 +143,23 @@ private struct ItemCell: View {
         if x < edge { return .before }
         if x > width - edge { return .after }
         return .onto
+    }
+}
+
+/// Shown when a search matches nothing.
+private struct EmptyResultsView: View {
+    let query: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(.white.opacity(0.6))
+            Text("No results for “\(query)”")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
     }
 }
 
