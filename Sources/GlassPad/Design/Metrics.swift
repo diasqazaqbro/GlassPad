@@ -51,8 +51,17 @@ enum Metrics {
     static let hoverHighlightOpacity: Double = 0.14
     static let selectedHighlightOpacity: Double = 0.20
 
+    // MARK: - Folders
+    static let folderTileCornerRadius: CGFloat = 22
+    static let folderTilePadding: CGFloat = 12
+    static let folderOverlayCornerRadius: CGFloat = 36
+    static let folderOverlayMaxWidth: CGFloat = 640
+    static let folderOverlayDim: Double = 0.32
+    static let glassContainerSpacing: CGFloat = 28
+
     // MARK: - Motion
     static let pop = Animation.spring(response: 0.3, dampingFraction: 0.8)
+    static let morph = Animation.bouncy(duration: 0.42)
     static let overlayFadeIn: TimeInterval = 0.18
     static let overlayFadeOut: TimeInterval = 0.14
     static let appearScaleFrom: CGFloat = 0.96

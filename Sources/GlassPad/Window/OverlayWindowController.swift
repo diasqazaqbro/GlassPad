@@ -108,6 +108,16 @@ final class OverlayWindowController {
 
     /// Returns nil to consume the event, or the event to pass it through.
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        // With a folder open, Esc closes it first; other nav keys are paused.
+        if model.openFolder != nil {
+            if event.keyCode == 53 {
+                withAnimation(Metrics.morph) { model.openFolder = nil }
+                return nil
+            }
+            // Let letters/Return reach the folder's rename field; swallow arrows.
+            return (123...126).contains(event.keyCode) ? nil : event
+        }
+
         switch event.keyCode {
         case 53: // Esc
             hide()
@@ -117,7 +127,7 @@ final class OverlayWindowController {
         case 125: model.move(.down);  return nil
         case 126: model.move(.up);    return nil
         case 36, 76: // Return / keypad Enter
-            if model.launchSelected() { hide() }
+            if model.activateSelected() { hide() }
             return nil
         default:
             return event // letters etc. reach the focused search field

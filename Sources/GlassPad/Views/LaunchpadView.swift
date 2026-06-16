@@ -1,25 +1,44 @@
 import SwiftUI
 
 /// Root overlay view: dimmed/blurred backdrop, a glass search pill, a horizontally
-/// paged app grid, and glass page dots. Fades+scales in on appear.
+/// paged item grid, glass page dots, and the morphing folder overlay.
 struct LaunchpadView: View {
     @Bindable var model: LaunchpadModel
     var onDismiss: () -> Void
 
     @FocusState private var searchFocused: Bool
     @State private var appeared = false
+    @Namespace private var glassNamespace
 
     var body: some View {
         ZStack {
             backdrop
+
             VStack(spacing: 0) {
                 SearchPill(query: $model.query, isFocused: $searchFocused)
                     .padding(.top, Metrics.searchTopPadding)
                     .padding(.bottom, Metrics.searchBottomPadding)
 
-                PagedGrid(model: model) { app in
-                    model.launch(app)
-                    onDismiss()
+                // The grid's folder tiles and the expanded folder panel share this
+                // container + namespace so the glass can morph between them.
+                GlassEffectContainer(spacing: Metrics.glassContainerSpacing) {
+                    ZStack {
+                        PagedGrid(model: model, namespace: glassNamespace) { app in
+                            model.launch(app)
+                            onDismiss()
+                        }
+
+                        if let folder = model.openFolder {
+                            FolderOverlay(
+                                folder: folder,
+                                apps: model.resolvedApps(in: folder),
+                                namespace: glassNamespace,
+                                onClose: { withAnimation(Metrics.morph) { model.openFolder = nil } },
+                                onLaunch: { app in model.launch(app); onDismiss() },
+                                onRename: { name in model.renameFolder(folder, to: name) }
+                            )
+                        }
+                    }
                 }
 
                 PageDots(count: model.pageCount, current: model.currentPage) { page in
@@ -31,7 +50,6 @@ struct LaunchpadView: View {
         .scaleEffect(appeared ? 1 : Metrics.appearScaleFrom)
         .onAppear {
             withAnimation(Metrics.pop) { appeared = true }
-            // Defer one runloop tick so the field is in the hierarchy first.
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: model.query) {
