@@ -6,6 +6,8 @@ struct SearchPill: View {
     @Binding var query: String
     @FocusState.Binding var isFocused: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
@@ -18,6 +20,7 @@ struct SearchPill: View {
                 .foregroundStyle(.white)
                 .tint(.white)
                 .focused($isFocused)
+                .accessibilityLabel("Search apps")
 
             if !query.isEmpty {
                 Button {
@@ -28,12 +31,13 @@ struct SearchPill: View {
                         .foregroundStyle(.white.opacity(0.6))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
                 .transition(.opacity)
             }
         }
         .padding(.horizontal, 16)
         .frame(width: Metrics.searchPillWidth, height: Metrics.searchPillHeight)
         .glassEffect(.regular.interactive(), in: .capsule)
-        .animation(Metrics.pop, value: query.isEmpty)
+        .animation(reduceMotion ? nil : Metrics.pop, value: query.isEmpty)
     }
 }

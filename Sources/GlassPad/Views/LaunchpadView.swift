@@ -13,6 +13,7 @@ struct LaunchpadView: View {
     @FocusState private var searchFocused: Bool
     @State private var appeared = false
     @Namespace private var glassNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GlassEffectContainer(spacing: Metrics.glassContainerSpacing) {
@@ -46,6 +47,7 @@ struct LaunchpadView: View {
                     FolderOverlay(
                         folder: folder,
                         apps: model.resolvedApps(in: folder),
+                        launchingItemID: model.launchingItemID,
                         namespace: glassNamespace,
                         onLaunch: { app in launchAndDismiss(app) },
                         onRename: { name in model.renameFolder(folder, to: name) }
@@ -56,7 +58,7 @@ struct LaunchpadView: View {
         .scaleEffect(appeared ? 1 : Metrics.appearScaleFrom)
         .onAppear {
             model.resetTransientState()
-            withAnimation(Metrics.pop) { appeared = true }
+            withAnimation(reduceMotion ? nil : Metrics.pop) { appeared = true }
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: model.query) {
@@ -65,15 +67,14 @@ struct LaunchpadView: View {
     }
 
     private func closeFolder() {
-        withAnimation(Metrics.morph) { model.openFolder = nil }
+        withAnimation(reduceMotion ? nil : Metrics.morph) { model.openFolder = nil }
     }
 
-    /// Pop the icon, then dismiss after a beat so the launch animation reads.
+    /// Pop the icon, then let the controller dismiss after a beat (generation-
+    /// guarded there) so the launch animation reads and a fast re-summon is safe.
     private func launchAndDismiss(_ app: InstalledApp) {
         model.launch(app)
-        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.launchDismissDelay) {
-            onDismiss()
-        }
+        onDismiss()
     }
 
     /// The blurred desktop the glass refracts. The material samples the window
@@ -84,5 +85,9 @@ struct LaunchpadView: View {
             Rectangle().fill(.black.opacity(Metrics.backdropDim))
         }
         .ignoresSafeArea()
+        .contentShape(Rectangle())
+        // Click empty space to dismiss (real Launchpad). When a folder is open its
+        // own dim overlay sits above this and handles the tap to close the folder.
+        .onTapGesture { if model.openFolder == nil { onDismiss() } }
     }
 }

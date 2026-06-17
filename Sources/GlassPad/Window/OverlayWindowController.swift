@@ -10,6 +10,10 @@ final class OverlayWindowController {
     private var keyMonitor: Any?
     private(set) var isVisible = false
 
+    /// Bumped on every show() so a deferred launch-dismiss scheduled for an older
+    /// summon can't hide a window the user just re-opened.
+    private var generation = 0
+
     init(model: LaunchpadModel) {
         self.model = model
     }
@@ -18,6 +22,7 @@ final class OverlayWindowController {
 
     func show() {
         guard !isVisible else { return }
+        generation += 1
         // A previous hide()'s fade-out may still be in flight; drop that window
         // immediately so we never end up with two overlays (its completion handler
         // is guarded by identity and won't touch the new window).
@@ -34,7 +39,7 @@ final class OverlayWindowController {
         window.makeKeyAndOrderFront(nil)
 
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = Metrics.overlayFadeIn
+            ctx.duration = Metrics.reduceMotion ? 0 : Metrics.overlayFadeIn
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
@@ -42,12 +47,22 @@ final class OverlayWindowController {
         isVisible = true
     }
 
+    /// Dismiss after a short beat so a launch pop is visible, but only if this
+    /// summon is still the current one (no re-open happened in the meantime).
+    private func scheduleLaunchHide() {
+        let gen = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.launchDismissDelay) { [weak self] in
+            guard let self, self.generation == gen, self.isVisible else { return }
+            self.hide()
+        }
+    }
+
     func hide() {
         guard isVisible, let window else { return }
         isVisible = false
         removeKeyMonitor()
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = Metrics.overlayFadeOut
+            ctx.duration = Metrics.reduceMotion ? 0 : Metrics.overlayFadeOut
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             window.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
@@ -87,7 +102,7 @@ final class OverlayWindowController {
         window.isReleasedWhenClosed = false
         window.setFrame(screen.frame, display: true)
 
-        let root = LaunchpadView(model: model, onDismiss: { [weak self] in self?.hide() })
+        let root = LaunchpadView(model: model, onDismiss: { [weak self] in self?.scheduleLaunchHide() })
         let host = NSHostingView(rootView: root)
         host.frame = window.contentLayoutRect
         window.contentView = host
@@ -117,18 +132,28 @@ final class OverlayWindowController {
 
     /// Returns nil to consume the event, or the event to pass it through.
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
-        // With a folder open, Esc closes it first; other nav keys are paused.
+        // With a folder open, route keys around the modal: Esc ends a rename (or
+        // closes the folder), arrows move the rename caret while editing, and Tab
+        // never cycles focus through the folder's app buttons.
         if model.openFolder != nil {
-            if event.keyCode == 53 {
-                withAnimation(Metrics.morph) { model.openFolder = nil }
+            let editingName = (window?.firstResponder as? NSText)?.isFieldEditor == true
+            switch event.keyCode {
+            case 53: // Esc
+                if editingName {
+                    // End the rename (it commits via the field's focus-loss
+                    // handler) but keep the folder open; a second Esc closes it.
+                    window?.makeFirstResponder(nil)
+                } else {
+                    withAnimation(Metrics.reduceMotion ? nil : Metrics.morph) { model.openFolder = nil }
+                }
                 return nil
-            }
-            // While the rename field is editing, let arrows move the caret/selection.
-            if let editor = window?.firstResponder as? NSText, editor.isFieldEditor {
+            case 48: // Tab
+                return editingName ? event : nil
+            case 123...126: // arrows: caret movement while editing, else swallowed
+                return editingName ? event : nil
+            default:
                 return event
             }
-            // Otherwise swallow arrows (no grid nav behind a folder); pass the rest.
-            return (123...126).contains(event.keyCode) ? nil : event
         }
 
         switch event.keyCode {
@@ -139,13 +164,10 @@ final class OverlayWindowController {
         case 124: model.move(.right); return nil
         case 125: model.move(.down);  return nil
         case 126: model.move(.up);    return nil
+        case 48: // Tab — arrow-only grid nav; don't let focus cycle through cells.
+            return nil
         case 36, 76: // Return / keypad Enter
-            if model.activateSelected() {
-                // Delay so the launch pop is visible before the overlay closes.
-                DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.launchDismissDelay) { [weak self] in
-                    self?.hide()
-                }
-            }
+            if model.activateSelected() { scheduleLaunchHide() }
             return nil
         default:
             return event // letters etc. reach the focused search field

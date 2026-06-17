@@ -1,7 +1,17 @@
 import SwiftUI
+import AppKit
 
 /// All design constants live here — no magic numbers in views (CLAUDE.md).
 enum Metrics {
+    // MARK: - Accessibility
+    /// `Reduce Motion` (System Settings › Accessibility › Display). Read on the
+    /// main actor at imperative animation sites (model/controller); SwiftUI views
+    /// should prefer `@Environment(\.accessibilityReduceMotion)`. When true, pass
+    /// `nil` to `withAnimation`/`.animation` so state changes apply instantly.
+    @MainActor static var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
     // MARK: - Grid
     static let iconSize: CGFloat = 100
     static let cellWidth: CGFloat = 124

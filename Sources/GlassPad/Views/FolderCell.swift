@@ -12,6 +12,7 @@ struct FolderCell: View {
     var onOpen: () -> Void
 
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var emphasized: Bool { isSelected || hovering }
     private var highlightOpacity: Double {
@@ -41,7 +42,10 @@ struct FolderCell: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(Metrics.pop, value: emphasized)
+        .animation(reduceMotion ? nil : Metrics.pop, value: emphasized)
+        .accessibilityLabel("\(folder.name) folder")
+        .accessibilityHint("Opens the folder")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
     @ViewBuilder

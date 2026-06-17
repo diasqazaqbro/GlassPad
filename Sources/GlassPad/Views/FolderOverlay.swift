@@ -9,6 +9,9 @@ import SwiftUI
 struct FolderOverlay: View {
     let folder: Folder
     let apps: [InstalledApp]
+    /// The id of the item currently launch-popping, so an app launched from inside
+    /// the folder shows the same pop animation it gets out on the grid.
+    var launchingItemID: String?
     var namespace: Namespace.ID
     var onLaunch: (InstalledApp) -> Void
     var onRename: (String) -> Void
@@ -25,12 +28,22 @@ struct FolderOverlay: View {
                 .foregroundStyle(.white)
                 .tint(.white)
                 .frame(maxWidth: 280)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(
+                    nameFocused ? Color.white.opacity(0.10) : .clear,
+                    in: .rect(cornerRadius: 9, style: .continuous)
+                )
                 .focused($nameFocused)
                 .onSubmit { commitName() }
+                .accessibilityLabel("Folder name")
 
             LazyVGrid(columns: columns, spacing: 20) {
                 ForEach(apps) { app in
-                    AppCell(app: app) { onLaunch(app) }
+                    AppCell(
+                        app: app,
+                        isLaunching: launchingItemID == LaunchpadItem.appItemID(app.id)
+                    ) { onLaunch(app) }
                 }
             }
         }

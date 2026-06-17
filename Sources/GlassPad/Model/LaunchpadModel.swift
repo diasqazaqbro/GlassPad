@@ -43,6 +43,10 @@ final class LaunchpadModel {
 
     var currentPage = 0
 
+    /// True once the first app scan has completed, so the UI can tell "still
+    /// loading" (show nothing) apart from "genuinely no apps" (show empty state).
+    private(set) var didLoad = false
+
     /// Generation token so a slow earlier scan can't overwrite a newer one.
     private var loadGeneration = 0
 
@@ -133,6 +137,8 @@ final class LaunchpadModel {
                 self.rebuildDisplayedItems()
                 self.clampPage()
             }
+
+            self.didLoad = true
         }
     }
 
@@ -232,13 +238,15 @@ final class LaunchpadModel {
             launch(app)
             return true
         case .folder(let folder):
-            withAnimation(Metrics.morph) { openFolder = folder }
+            withAnimation(Metrics.reduceMotion ? nil : Metrics.morph) { openFolder = folder }
             return false
         }
     }
 
     func launch(_ app: InstalledApp) {
-        withAnimation(Metrics.pop) { launchingItemID = LaunchpadItem.appItemID(app.id) }
+        withAnimation(Metrics.reduceMotion ? nil : Metrics.pop) {
+            launchingItemID = LaunchpadItem.appItemID(app.id)
+        }
         LaunchService.launch(app)
     }
 

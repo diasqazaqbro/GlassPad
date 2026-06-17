@@ -11,6 +11,7 @@ struct AppCell: View {
 
     @State private var icon: NSImage?
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var highlightOpacity: Double {
         if isSelected { return Metrics.selectedHighlightOpacity }
@@ -46,7 +47,10 @@ struct AppCell: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(Metrics.pop, value: scale)
+        .animation(reduceMotion ? nil : Metrics.pop, value: scale)
+        .accessibilityLabel(app.name)
+        .accessibilityHint("Launches \(app.name)")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .task(id: app.id) {
             icon = await IconLoader.shared.icon(forPath: app.id)
         }

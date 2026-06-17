@@ -8,6 +8,7 @@ struct PagedGrid: View {
     var onLaunch: (InstalledApp) -> Void
 
     @State private var scrolledPage: Int?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
@@ -31,6 +32,8 @@ struct PagedGrid: View {
             .overlay {
                 if model.searching && model.displayedItems.isEmpty {
                     EmptyResultsView(query: model.query)
+                } else if !model.searching && model.didLoad && model.displayedItems.isEmpty {
+                    NoAppsView()
                 }
             }
             .onAppear {
@@ -44,7 +47,7 @@ struct PagedGrid: View {
             }
             .onChange(of: model.currentPage) { _, new in
                 if scrolledPage != new {
-                    withAnimation(Metrics.pop) { scrolledPage = new }
+                    withAnimation(reduceMotion ? nil : Metrics.pop) { scrolledPage = new }
                 }
             }
         }
@@ -85,6 +88,7 @@ private struct ItemCell: View {
     var onLaunch: (InstalledApp) -> Void
 
     @State private var width: CGFloat = Metrics.cellWidth
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         content
@@ -113,7 +117,7 @@ private struct ItemCell: View {
                 isOpen: model.openFolder?.id == folder.id,
                 namespace: namespace
             ) {
-                withAnimation(Metrics.morph) { model.openFolder = folder }
+                withAnimation(reduceMotion ? nil : Metrics.morph) { model.openFolder = folder }
             }
         }
     }
@@ -156,6 +160,21 @@ private struct EmptyResultsView: View {
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(.white.opacity(0.6))
             Text("No results for “\(query)”")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+    }
+}
+
+/// Shown after a scan finds no installed apps at all (distinct from a search miss).
+private struct NoAppsView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "square.grid.3x3")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(.white.opacity(0.6))
+            Text("No apps found")
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(.white.opacity(0.85))
         }

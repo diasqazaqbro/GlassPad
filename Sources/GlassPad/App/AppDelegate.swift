@@ -21,6 +21,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Dismiss the overlay when the app loses focus (the user clicked another app
+    /// or screen) — matches real Launchpad, which never lingers in the background.
+    func applicationDidResignActive(_ notification: Notification) {
+        overlay.hide()
+    }
+
+    /// Tear down the FSEvents stream on the main queue before exit, so no callback
+    /// can fire against a half-released watcher.
+    func applicationWillTerminate(_ notification: Notification) {
+        watcher.stop()
+    }
+
     // MARK: - Menu-bar item
 
     private func setUpStatusItem() {
