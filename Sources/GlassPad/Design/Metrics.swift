@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// All design constants live here — no magic numbers in views (CLAUDE.md).
+/// All design constants live here — no magic numbers in views (CONVENTIONS.md).
 enum Metrics {
     // MARK: - Accessibility
     /// `Reduce Motion` (System Settings › Accessibility › Display). Read on the

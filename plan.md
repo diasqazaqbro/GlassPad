@@ -1,4 +1,4 @@
-# GlassPad — Build Plan for Claude Code
+# GlassPad — Build Plan
 
 A native macOS Launchpad replacement with authentic Liquid Glass. Built because Apple removed Launchpad in macOS 26 Tahoe and folded it into Spotlight. Goal: bring back the full-screen visual app grid, but make it look *more* native than the original by adopting Tahoe's real Liquid Glass material.
 
@@ -99,7 +99,7 @@ GlassPad/
    └─ Assets.xcassets
 ```
 
-Seed a `CLAUDE.md` at repo root from §10 conventions.
+Seed a `CONVENTIONS.md` at repo root from §10 conventions.
 
 ---
 
@@ -240,7 +240,7 @@ Match Launchpad's feel, then layer Tahoe glass on the chrome.
 
 ---
 
-## 10. Gotchas, permissions, conventions (seed CLAUDE.md with this)
+## 10. Gotchas, permissions, conventions (seed CONVENTIONS.md with this)
 
 - **Glass needs macOS 26.** No back-deploy. Gate nothing; just require 26.
 - **Borderless windows can't become key** unless you override `canBecomeKey` — without it, no typing, no Esc.
