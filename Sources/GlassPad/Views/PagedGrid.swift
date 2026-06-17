@@ -82,10 +82,13 @@ struct PagedGrid: View {
             let rows = Metrics.rowCount(forHeight: geo.size.height, scale: scale)
 
             ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
-                    // Read the *stored* page slices (model.pages is no longer a
-                    // recomputed property) and iterate by index, so a scroll-driven
-                    // re-render does no per-frame array work.
+                // EAGER HStack (not Lazy): every page is built up front, so a swipe
+                // never realizes a page's ~35 cells mid-fling — that just-in-time
+                // realization was the scroll hitch. The pages count is small and
+                // bounded; the one-time build at appear is cheap (icons load async,
+                // cached), and off-screen pages are clipped (clipping re-enabled
+                // below), so eager realization adds no per-frame draw cost.
+                HStack(spacing: 0) {
                     ForEach(model.pages.indices, id: \.self) { index in
                         PageView(
                             items: model.pages[index],
@@ -106,7 +109,6 @@ struct PagedGrid: View {
             .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
             .scrollPosition(id: $scrolledPage, anchor: .center)
             .scrollIndicators(.hidden)
-            .scrollClipDisabled()
             .overlay {
                 if model.searching && model.displayedItems.isEmpty {
                     EmptyResultsView(query: model.query)
@@ -153,21 +155,33 @@ private struct PageView: View {
     var onLaunch: (InstalledApp) -> Void
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: Metrics.rowSpacing) {
-            ForEach(items) { item in
-                ItemCell(item: item, model: model, namespace: namespace,
-                         iconScale: iconScale, useLiveGlass: useLiveGlass, onLaunch: onLaunch)
+        // Eager rows (VStack/HStack), NOT LazyVGrid: a lazy grid defers realizing
+        // its cells until they enter the scroll viewport, which re-introduces a
+        // per-page scroll hitch even with an eager outer HStack. Explicit rows are
+        // built immediately, so a swipe composites a ready page.
+        let columnCount = max(1, model.columns)
+        let rows = stride(from: 0, to: items.count, by: columnCount).map {
+            Array(items[$0 ..< min($0 + columnCount, items.count)])
+        }
+        return VStack(spacing: Metrics.rowSpacing) {
+            ForEach(rows.indices, id: \.self) { r in
+                HStack(spacing: Metrics.columnSpacing) {
+                    ForEach(rows[r]) { item in
+                        ItemCell(item: item, model: model, namespace: namespace,
+                                 iconScale: iconScale, useLiveGlass: useLiveGlass, onLaunch: onLaunch)
+                            .frame(maxWidth: .infinity)
+                    }
+                    // Keep a short last row left-aligned (cells stay column-width).
+                    if rows[r].count < columnCount {
+                        ForEach(0 ..< (columnCount - rows[r].count), id: \.self) { _ in
+                            Color.clear.frame(maxWidth: .infinity)
+                        }
+                    }
+                }
             }
         }
         .padding(.horizontal, Metrics.gridHorizontalMargin)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    private var columns: [GridItem] {
-        Array(
-            repeating: GridItem(.flexible(), spacing: Metrics.columnSpacing, alignment: .top),
-            count: model.columns
-        )
     }
 }
 
