@@ -47,6 +47,24 @@ final class LaunchpadModel {
 
     var currentPage = 0
 
+    // MARK: - Custom pager state (driven by the scroll-wheel monitor)
+
+    /// Live horizontal translation of the page stack while a two-finger swipe is in
+    /// flight, in points. Zero at rest. The scroll monitor in `OverlayWindowController`
+    /// accumulates `scrollingDeltaX` into this during `.changed` (rubber-banded at the
+    /// ends); the view adds it to `-currentPage * pageWidth` as a single `.offset(x:)`.
+    /// Reset to 0 on commit so the stack springs to the resting page.
+    var dragTranslation: CGFloat = 0
+
+    /// True exactly while a finger is down on a paging swipe. The view disables its
+    /// offset animation while this is true so the stack tracks the finger 1:1 (no
+    /// spring lagging the live drag); the commit re-enables the spring.
+    var isPaging = false
+
+    /// Page width in points, published by `PagedGrid` from its `GeometryReader`, so
+    /// the scroll monitor can do commit-fraction + rubber-band math in real units.
+    var pageWidth: CGFloat = 1
+
     /// True once the first app scan has completed, so the UI can tell "still
     /// loading" (show nothing) apart from "genuinely no apps" (show empty state).
     private(set) var didLoad = false
@@ -205,6 +223,43 @@ final class LaunchpadModel {
         currentPage = max(0, min(page, pageCount - 1))
     }
 
+    // MARK: - Swipe paging (called by the scroll-wheel monitor, @MainActor)
+
+    /// A new two-finger swipe began. Reset live translation and enter live-track mode
+    /// so the view stops animating the offset and follows the finger 1:1.
+    func beginPaging() {
+        isPaging = true
+        dragTranslation = 0
+    }
+
+    /// Live swipe update: `dx` is the accumulated page-forward translation in points
+    /// (already natural-direction-corrected by the caller — positive drags the stack
+    /// right toward the previous page). Rubber-band past the first and last page so
+    /// the ends feel elastic rather than dead.
+    func updatePaging(translation dx: CGFloat) {
+        let atLeadingEdge = currentPage == 0 && dx > 0
+        let atTrailingEdge = currentPage == pageCount - 1 && dx < 0
+        dragTranslation = (atLeadingEdge || atTrailingEdge) ? dx * Metrics.pageRubberBand : dx
+    }
+
+    /// The swipe ended (finger lifted). Commit at most ±1 page by displacement OR
+    /// velocity, then zero the live translation so the view springs to the resting
+    /// page. `velocity` is points/sec, page-forward-positive. The caller ignores
+    /// momentum, so this fires once per physical swipe → exactly one page max.
+    func endPaging(velocity: CGFloat) {
+        defer { isPaging = false; dragTranslation = 0 }
+        guard openFolder == nil else { return }
+        let threshold = pageWidth * Metrics.pageCommitFraction
+        let flicked = abs(velocity) >= Metrics.pageFlickVelocity
+        let passed = abs(dragTranslation) >= threshold
+        guard passed || flicked else { return } // snap back to the same page
+        // Positive translation/velocity drags the stack right → reveals the page to
+        // the LEFT → previous page. Negative → next page. Prefer the live
+        // translation's sign; fall back to velocity when below threshold but flicked.
+        let direction = dragTranslation != 0 ? dragTranslation : velocity
+        goToPage(currentPage + (direction < 0 ? 1 : -1))
+    }
+
     func handleQueryChange() {
         rebuildDisplayedItems()
         currentPage = 0
@@ -273,6 +328,8 @@ final class LaunchpadModel {
         openFolder = nil
         selectedItemID = nil
         currentPage = 0
+        dragTranslation = 0
+        isPaging = false
         rebuildDisplayedItems()
     }
 

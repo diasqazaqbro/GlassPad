@@ -72,6 +72,18 @@ enum Metrics {
 
     // MARK: - Motion
     static let pop = Animation.spring(response: 0.3, dampingFraction: 0.8)
+    /// Page-flip spring for the custom pager's `.offset`. Tuned for a crisp,
+    /// native-Launchpad flip over a full page width: fast enough to feel immediate,
+    /// damped just under 1 so it settles cleanly with no visible overshoot/bounce
+    /// (a between-pages wobble would read as resting off-boundary).
+    static let pageSpring = Animation.spring(response: 0.32, dampingFraction: 0.86)
+    /// Fraction of a page width a live swipe must cover to commit (else velocity).
+    static let pageCommitFraction: CGFloat = 0.25
+    /// Swipe speed (points/sec) that commits a page regardless of displacement — a
+    /// light two-finger flick turns the page without dragging a quarter-width.
+    static let pageFlickVelocity: CGFloat = 380
+    /// How much the stack moves per point of over-pull at the first/last page.
+    static let pageRubberBand: CGFloat = 0.32
     static let morph = Animation.bouncy(duration: 0.42)
     static let overlayFadeIn: TimeInterval = 0.18
     static let overlayFadeOut: TimeInterval = 0.14

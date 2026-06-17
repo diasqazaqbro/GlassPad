@@ -8,7 +8,22 @@ final class OverlayWindowController {
     private let model: LaunchpadModel
     private var window: KeyableWindow?
     private var keyMonitor: Any?
+    private var scrollMonitor: Any?
     private(set) var isVisible = false
+
+    // MARK: - Swipe-to-page state (touched only on the main actor, in the monitor)
+
+    /// Whether a precise (trackpad) gesture is currently in flight (we saw `.began`
+    /// and not yet `.ended`/`.cancelled`). Guards against treating a stray
+    /// momentum/legacy-wheel event as a fresh gesture.
+    private var swipeActive = false
+    /// Accumulated page-forward translation (points) for the in-flight swipe, fed
+    /// live to `model.updatePaging` so the page stack tracks the finger 1:1.
+    private var swipeAccumX: CGFloat = 0
+    /// Timestamp of the last `.changed` frame and the last per-frame velocity
+    /// (points/sec), used to decide a flick commit on lift.
+    private var lastScrollTime: TimeInterval = 0
+    private var lastScrollVelocity: CGFloat = 0
 
     /// Opens Settings (set by AppDelegate) — invoked on ⌘, so Settings is always
     /// reachable from the overlay, independent of the menu-bar icon.
@@ -48,6 +63,7 @@ final class OverlayWindowController {
             window.animator().alphaValue = 1
         }
         installKeyMonitor()
+        installScrollMonitor()
         isVisible = true
         captureWallpaperIfEnabled(on: screen, window: window)
     }
@@ -92,6 +108,7 @@ final class OverlayWindowController {
         guard isVisible, let window else { return }
         isVisible = false
         removeKeyMonitor()
+        removeScrollMonitor()
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Metrics.reduceMotion ? 0 : Metrics.overlayFadeOut
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -162,6 +179,121 @@ final class OverlayWindowController {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
+        }
+    }
+
+    // MARK: - Trackpad paging (two-finger horizontal swipe)
+
+    /// Capture two-finger horizontal scrolls and turn them into one-page-per-swipe
+    /// flips on `model.currentPage`. A *local* `.scrollWheel` monitor is the right
+    /// hook because it intercepts every scroll routed to our app before any view
+    /// handles it — independent of the responder chain — so a swipe *anywhere* over
+    /// the overlay grid is seen, even though SwiftUI's icon cells sit on top in the
+    /// hosting view. (A background sibling `NSView` overriding `scrollWheel(with:)`
+    /// would not be reliable: it isn't an ancestor of the cells, and the hosting
+    /// view's subviews consume scroll, so events wouldn't bubble to it.)
+    ///
+    /// This monitor fires on the main thread (AppKit event delivery), so all the
+    /// swipe state it touches is main-actor-isolated — strict-concurrency clean with
+    /// no hops.
+    private func installScrollMonitor() {
+        removeScrollMonitor()
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+            return self.handleScroll(event)
+        }
+    }
+
+    private func removeScrollMonitor() {
+        if let scrollMonitor {
+            NSEvent.removeMonitor(scrollMonitor)
+            self.scrollMonitor = nil
+        }
+        swipeActive = false
+        swipeAccumX = 0
+        lastScrollVelocity = 0
+    }
+
+    /// Drive the custom finger-follow pager from the two-finger trackpad swipe
+    /// stream. The page stack tracks the finger 1:1 during the gesture and springs
+    /// to the committed page on lift — most native, like real Launchpad.
+    ///
+    /// Phase machine for precise (trackpad) scrolls:
+    ///   .began   → start a swipe (reset accumulator, `model.beginPaging`)
+    ///   .changed → accumulate page-forward translation + velocity, `model.updatePaging`
+    ///   .ended   → `model.endPaging` commits at most ±1 page by displacement OR velocity
+    /// Momentum frames (`.momentumPhase`) are swallowed without effect: a precise
+    /// flick has already decided the page on lift, so ignoring momentum is what
+    /// guarantees one-page-per-swipe (never coast two, never rest between).
+    ///
+    /// Returns `nil` to consume a recognized horizontal trackpad swipe (so it never
+    /// also scrolls something underneath), or the event to pass it through (a
+    /// vertical scroll, a legacy mouse wheel, or anything while a folder is open).
+    private func handleScroll(_ event: NSEvent) -> NSEvent? {
+        // While a folder is open, paging is suppressed; pass the event through so the
+        // open folder's own content can scroll. End any in-flight swipe cleanly.
+        guard model.openFolder == nil else {
+            if swipeActive { swipeActive = false; model.endPaging(velocity: 0) }
+            return event
+        }
+
+        // Only precise (trackpad / Magic Mouse) gestures page. A legacy wheel has no
+        // momentum phase and no precise deltas — pass it through untouched.
+        let hasPhase = event.phase != [] || event.momentumPhase != []
+        guard event.hasPreciseScrollingDeltas, hasPhase else { return event }
+
+        // Page-forward convention: positive = drag the stack right (toward the
+        // previous page). `scrollingDeltaX` already has the user's natural-scroll
+        // setting baked into its sign; `isDirectionInvertedFromDevice` reports when
+        // that inversion is active, so we re-flip to one consistent convention where
+        // dragging two fingers right always moves the stack right, regardless of the
+        // natural-scroll setting.
+        let raw = CGFloat(event.scrollingDeltaX)
+        let dx = event.isDirectionInvertedFromDevice ? raw : -raw
+
+        // Momentum is the inertial tail after the fingers lift. The decision was made
+        // on `.ended`; swallow momentum so it can't add a second page or scroll
+        // anything underneath.
+        if event.momentumPhase != [] { return nil }
+
+        switch event.phase {
+        case .began:
+            swipeActive = true
+            swipeAccumX = 0
+            lastScrollVelocity = 0
+            lastScrollTime = event.timestamp
+            model.beginPaging()
+            return nil
+
+        case .changed:
+            // Some gestures omit `.began`; start one lazily so we never drop a swipe.
+            if !swipeActive {
+                swipeActive = true
+                swipeAccumX = 0
+                lastScrollVelocity = 0
+                lastScrollTime = event.timestamp
+                model.beginPaging()
+            }
+            swipeAccumX += dx
+            let now = event.timestamp
+            let dt = now - lastScrollTime
+            if dt > 0 { lastScrollVelocity = dx / CGFloat(dt) } // points/sec
+            lastScrollTime = now
+            model.updatePaging(translation: swipeAccumX)
+            return nil
+
+        case .ended, .cancelled:
+            if swipeActive {
+                swipeActive = false
+                model.endPaging(velocity: lastScrollVelocity)
+            }
+            swipeAccumX = 0
+            return nil
+
+        default:
+            // Phases like `.stationary` / `.mayBegin`: consume if we're mid-gesture
+            // (keep ownership of the stream), else pass through.
+            return swipeActive ? nil : event
         }
     }
 

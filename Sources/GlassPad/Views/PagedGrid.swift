@@ -2,61 +2,52 @@ import SwiftUI
 
 /// Horizontally paged grid of launcher items (apps + folders).
 ///
-/// ## Why this pager is stable AND smooth
+/// ## Why this pager is buttery, stable, and coexists with drag-to-reorder
 ///
-/// Paging is driven entirely by SwiftUI's built-in **view-aligned** scrolling —
-/// no custom `ScrollTargetBehavior`, no hand-rolled container `DragGesture`, no
-/// manual `.offset`. There is exactly **one** source of truth for the visible
-/// page (`scrolledPage`, the `.scrollPosition` id); `model.currentPage` mirrors
-/// it through a single guarded, non-oscillating bridge.
+/// Paging is a **custom offset/transform pager**, not a `ScrollView`. Every
+/// `ScrollView` strategy (`.paging`, a custom `ScrollTargetBehavior`,
+/// `.viewAligned(.alwaysByOne)`) lagged because each one runs scroll *physics* and
+/// re-evaluates layout per frame as the content offset changes. This pager instead
+/// lays out an **eager** `HStack` of full-width pages once and slides the whole
+/// stack with a single `.offset(x:)`. A page flip is then a pure GPU layer
+/// transform of already-rendered layers — exactly the native-Launchpad path.
 ///
-///  1. **STABLE.** `.scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))`
-///     always snaps the resting offset to a page boundary (each page is
-///     `.id`-tagged and exactly the container width), so it is *mathematically
-///     impossible* to come to rest between pages — no jitter, no "landed at 0.5"
-///     state. `.alwaysByOne` is a hard one-page-per-gesture cap computed
-///     synchronously by the framework from the live offset + velocity, so a swipe
-///     can never skip a page no matter how fast, and rapid consecutive swipes each
-///     resolve to one definite boundary. (The rejected `PageFlickBehavior` jumped
-///     two pages because it added `fromPage ± 1` to a `fromPage` sampled
-///     asynchronously, which lagged a fast gesture by a page.)
+///  1. **BUTTERY.** A swipe mutates one `CGFloat` (`model.dragTranslation`) and the
+///     view applies it as `.offset(x:)`. No scroll re-layout, no per-frame page
+///     re-slice (`model.pages` is O(1) stored), no Liquid Glass resample (this grid
+///     renders *outside* any `GlassEffectContainer`, see `LaunchpadView`). The GPU
+///     just composites ready pages — 60fps with zero stutter.
 ///
-///  2. **COMFORTABLE.** Plain `.paging` requires dragging past the half-way point,
-///     which the user found too stiff. `.viewAligned` is velocity-driven: a light
-///     two-finger flick (which carries velocity, not displacement) turns the page —
-///     no near-half-page drag — while `.alwaysByOne` still caps it at one page.
+///  2. **DRIVEN BY SCROLL-WHEEL, NOT A DRAGGESTURE.** The swipe is captured by an
+///     `NSEvent .scrollWheel` *local monitor* in `OverlayWindowController` — a
+///     two-finger trackpad event stream. A local monitor sits **above** the
+///     responder chain: it intercepts every scroll routed to the overlay *before*
+///     any view hit-test, so it sees the swipe regardless of which SwiftUI cell is
+///     under the cursor (a *background sibling* `NSView` would NOT — scroll is
+///     routed by hit-test to the cell under the cursor and walks that cell's
+///     ancestors, never sideways to a sibling; and a *front* catcher that returned
+///     `hitTest → nil` would remove itself from scroll routing too). It is
+///     deliberately **not** a SwiftUI `DragGesture` (a one-finger drag), which would
+///     fight the per-cell `.draggable`. Trackpad scroll and click-drag are disjoint
+///     NSEvent streams, so the pager and the cell reorder can never contend for one
+///     gesture. The `.draggable`/`.dropDestination` on `ItemCell` are untouched.
 ///
-///  3. **SMOOTH (the fix).** The snap mechanic was never the lag — the *render cost
-///     per scroll frame* was. Three per-frame costs are now gone:
-///       • **No live Liquid Glass behind the moving icons.** This grid renders
-///         *outside* any `GlassEffectContainer` (see `LaunchpadView`), and its
-///         folder tiles use a cheap static material while scrolling (real glass
-///         only while a folder is open, when the grid is static — `useLiveGlass`).
-///         So a swipe recomputes zero glass backdrop, exactly like real Launchpad.
-///       • **No per-frame page re-slice.** The page list is read from a *stored*
-///         `model.pages` (O(1)); it used to be a computed property that re-`stride`d
-///         + allocated ~100 items on every body evaluation.
-///       • **No mid-fling thrash.** The `scrolledPage → currentPage` bridge only
-///         ever writes a *different* integer (and ignores a transient `nil`), so it
-///         cannot re-invalidate the body with the same value during the fling.
+///  3. **ONE PAGE PER SWIPE.** The monitor accumulates `scrollingDeltaX` while the
+///     gesture is live and, on lift, commits to **at most ±1 page** by displacement
+///     or velocity (`model.endPaging`). Momentum frames are swallowed, so a flick
+///     never coasts two pages and never rests between pages.
 ///
-///  4. **COEXISTS WITH DRAG-TO-REORDER.** There is deliberately **no** custom
-///     `DragGesture` on the container — the single most important decision here.
-///     The pager rides only `ScrollView`'s native, content-drag-aware scroll
-///     recognizer, so a press that begins on a `.draggable` cell starts a drag
-///     session (lifting the icon) while a free horizontal pan scrolls the page.
-///     Nothing on the container can swallow a cell's `.draggable` press-drag, and
-///     nothing for the cell drag to fight. (A simultaneous / high-priority container
-///     `DragGesture` layered over per-cell `.draggable` — the rejected anti-pattern —
-///     routinely has both recognizers contend for the same press; this design
-///     removes that entire class of conflict.)
+///  4. **LIVE FINGER-FOLLOW.** While the gesture is live the stack tracks the finger
+///     in real time (`model.dragTranslation`) and rubber-bands past the first/last
+///     page; on release it springs to the committed page. Most native feel.
+///     Reduce-motion drops the live track + spring and jumps instantly.
 ///
-///  5. **SYNCS with `model.currentPage`.** Swipe-driven changes flow one way
-///     (`scrolledPage → currentPage`, no animation). Programmatic changes — page
-///     dots, keyboard arrows via `model.move`, `Cmd+1…9` via `model.goToPage` —
-///     flow the other way (`currentPage → scrolledPage`, animated), guarded by
-///     `syncingFromModel` so the echo can never bounce back and restart the scroll
-///     animation mid-fling.
+///  5. **SYNCS `model.currentPage`.** The resting offset is `-currentPage *
+///     pageWidth`, so page dots, arrows (`model.move`), and `Cmd+1…9`
+///     (`model.goToPage`) all animate the offset simply by changing `currentPage`.
+///     Swipe commits flow the *same* way: the monitor sets `currentPage` and zeroes
+///     `dragTranslation`, the view springs to the resting page. One source of truth,
+///     one direction (`currentPage → offset`), no ping-pong bridge.
 struct PagedGrid: View {
     @Bindable var model: LaunchpadModel
     var namespace: Namespace.ID
@@ -65,14 +56,6 @@ struct PagedGrid: View {
     var useLiveGlass: Bool = false
     var onLaunch: (InstalledApp) -> Void
 
-    /// THE single source of truth for the visible page. Bound to `.scrollPosition`,
-    /// so the scroll view and this value are identical by construction.
-    @State private var scrolledPage: Int?
-    /// True only while we are applying a *programmatic* scroll (dots / keyboard).
-    /// Guards the `scrolledPage → currentPage` bridge from writing back the value we
-    /// just set, so the two sides can never ping-pong. Set and cleared synchronously
-    /// across the paired `onChange` handlers — no async re-arming, no timing race.
-    @State private var syncingFromModel = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -80,35 +63,51 @@ struct PagedGrid: View {
             let scale = AppSettings.gridDensity.scale
             let cols = Metrics.columnCount(forWidth: geo.size.width, scale: scale)
             let rows = Metrics.rowCount(forHeight: geo.size.height, scale: scale)
+            let pageWidth = geo.size.width
 
-            ScrollView(.horizontal) {
-                // EAGER HStack (not Lazy): every page is built up front, so a swipe
-                // never realizes a page's ~35 cells mid-fling — that just-in-time
-                // realization was the scroll hitch. The pages count is small and
-                // bounded; the one-time build at appear is cheap (icons load async,
-                // cached), and off-screen pages are clipped (clipping re-enabled
-                // below), so eager realization adds no per-frame draw cost.
-                HStack(spacing: 0) {
-                    ForEach(model.pages.indices, id: \.self) { index in
-                        PageView(
-                            items: model.pages[index],
-                            model: model,
-                            namespace: namespace,
-                            iconScale: scale,
-                            useLiveGlass: useLiveGlass,
-                            onLaunch: onLaunch
-                        )
-                        .frame(width: geo.size.width)
-                        .id(index)
-                    }
+            // The resting offset for the current page, plus the live swipe
+            // translation the scroll monitor publishes. While the gesture is live,
+            // `dragTranslation` follows the finger; on release the monitor zeroes it
+            // and (maybe) advances `currentPage`, so the rest position springs to the
+            // new page. One `.offset(x:)` for the whole eager stack.
+            let restOffset = -CGFloat(model.currentPage) * pageWidth
+            let liveOffset = restOffset + model.dragTranslation
+
+            // EAGER HStack (not Lazy): every page + its cells are built up front, so a
+            // swipe never realizes a page's ~35 cells mid-flip — that just-in-time
+            // realization was the original scroll hitch. The page count is small and
+            // bounded; the one-time build at appear is cheap (icons load async,
+            // cached) and off-screen pages are clipped, so eager realization adds no
+            // per-frame draw cost. A flip just composites ready layers.
+            HStack(spacing: 0) {
+                ForEach(model.pages.indices, id: \.self) { index in
+                    PageView(
+                        items: model.pages[index],
+                        model: model,
+                        namespace: namespace,
+                        iconScale: scale,
+                        useLiveGlass: useLiveGlass,
+                        onLaunch: onLaunch
+                    )
+                    .frame(width: pageWidth)
                 }
-                .scrollTargetLayout()
             }
-            // Built-in page-aligned snapping. `.alwaysByOne` = at most one page per
-            // gesture (stable), but velocity-driven so a light flick is enough (comfortable).
-            .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
-            .scrollPosition(id: $scrolledPage, anchor: .center)
-            .scrollIndicators(.hidden)
+            // Anchor the stack's leading edge to the container's leading edge, then
+            // slide it. (`.leading` keeps page 0 at x=0 so `-page * width` is exact.)
+            .frame(width: pageWidth, alignment: .leading)
+            .offset(x: liveOffset)
+            // Animate ONLY the resting page change (commit / dots / keyboard). The
+            // live finger-follow updates `dragTranslation` while `isPaging` is true,
+            // and we suppress the spring then so the stack tracks the finger 1:1
+            // without a spring lagging behind. The commit zeroes `dragTranslation`
+            // and clears `isPaging`, re-enabling the spring to the resting page.
+            .animation(reduceMotion || model.isPaging ? nil : Metrics.pageSpring,
+                       value: model.currentPage)
+            .animation(reduceMotion || model.isPaging ? nil : Metrics.pageSpring,
+                       value: model.dragTranslation)
+            // Clip off-screen pages so neighbors never draw outside the container.
+            .frame(width: pageWidth, height: geo.size.height, alignment: .leading)
+            .clipped()
             .overlay {
                 if model.searching && model.displayedItems.isEmpty {
                     EmptyResultsView(query: model.query)
@@ -116,31 +115,15 @@ struct PagedGrid: View {
                     NoAppsView()
                 }
             }
+            // Publish the page width so the scroll monitor (in the controller) can do
+            // its commit-fraction + rubber-band math in real units.
             .onAppear {
                 model.setGrid(columns: cols, rows: rows)
-                scrolledPage = model.currentPage
+                model.pageWidth = pageWidth
             }
+            .onChange(of: pageWidth) { _, w in model.pageWidth = w }
             .onChange(of: cols) { model.setGrid(columns: cols, rows: rows) }
             .onChange(of: rows) { model.setGrid(columns: cols, rows: rows) }
-            // Swipe-driven: the user dragged the scroll view to a new page. Ignore the
-            // value we ourselves just set programmatically (guarded below), and ignore
-            // a transient `nil` (the binding is briefly nil during layout changes).
-            .onChange(of: scrolledPage) { _, new in
-                guard !syncingFromModel, let new, new != model.currentPage else { return }
-                model.currentPage = new
-            }
-            // Programmatic-driven: dots tapped or keyboard moved the page. Scroll to
-            // match. Arm the guard before mutating `scrolledPage` so the resulting
-            // echo is swallowed by the handler above, then disarm synchronously — the
-            // `scrolledPage` onChange runs as part of this same state-application pass,
-            // so by the time we return the echo has already been (and only ever could
-            // be) ignored. No DispatchQueue, no timing assumption.
-            .onChange(of: model.currentPage) { _, new in
-                guard scrolledPage != new else { return }
-                syncingFromModel = true
-                withAnimation(reduceMotion ? nil : Metrics.pop) { scrolledPage = new }
-                syncingFromModel = false
-            }
         }
     }
 }
@@ -156,9 +139,9 @@ private struct PageView: View {
 
     var body: some View {
         // Eager rows (VStack/HStack), NOT LazyVGrid: a lazy grid defers realizing
-        // its cells until they enter the scroll viewport, which re-introduces a
-        // per-page scroll hitch even with an eager outer HStack. Explicit rows are
-        // built immediately, so a swipe composites a ready page.
+        // its cells until they enter the viewport, which re-introduces a per-page
+        // hitch even with an eager outer HStack. Explicit rows are built immediately,
+        // so a flip composites a ready page.
         let columnCount = max(1, model.columns)
         let rows = stride(from: 0, to: items.count, by: columnCount).map {
             Array(items[$0 ..< min($0 + columnCount, items.count)])
@@ -188,13 +171,11 @@ private struct PageView: View {
 /// Wraps an app/folder cell with drag-and-drop. Dropping onto a cell's center
 /// makes/extends a folder; dropping near the left/right edge reorders.
 ///
-/// Drag-to-reorder coexists with the pager because the pager attaches **no custom
-/// `DragGesture`** to the container — it relies solely on `ScrollView`'s native
-/// scroll recognizer plus the built-in view-aligned `ScrollTargetBehavior`. That
-/// recognizer is content-drag aware: a press that begins on a `.draggable` cell
-/// starts a drag session (lifting the icon), while a free horizontal pan scrolls
-/// the page. There is therefore nothing on the container to "swallow" the cell's
-/// draggable press-drag, and nothing for the cell drag to fight.
+/// Drag-to-reorder coexists with the pager because paging is driven by a
+/// **scroll-wheel** (two-finger trackpad) event stream captured in
+/// `OverlayWindowController`, while a cell lift is a **one-finger click-drag**
+/// surfaced here as `.draggable`. The two are disjoint NSEvent streams, so there is
+/// no container gesture to swallow a cell's drag and nothing for the cell to fight.
 private struct ItemCell: View {
     let item: LaunchpadItem
     @Bindable var model: LaunchpadModel
