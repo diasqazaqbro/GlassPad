@@ -27,17 +27,18 @@ enum Metrics {
     static let preferredRows = 5
 
     /// Columns derived from available width (HIG: don't hardcode for one display).
-    static func columnCount(forWidth width: CGFloat) -> Int {
+    /// `scale` is the density multiplier: <1 packs more columns, >1 fewer.
+    static func columnCount(forWidth width: CGFloat, scale: CGFloat = 1) -> Int {
         let usable = width - gridHorizontalMargin * 2
-        let perColumn = cellWidth + columnSpacing
+        let perColumn = (cellWidth + columnSpacing) * scale
         let n = Int((usable / perColumn).rounded(.down))
         return max(4, min(9, n))
     }
 
     /// Rows derived from available height (minus the search and page-dot chrome).
-    static func rowCount(forHeight height: CGFloat) -> Int {
+    static func rowCount(forHeight height: CGFloat, scale: CGFloat = 1) -> Int {
         let usable = height - searchAreaHeight - pageDotsAreaHeight
-        let perRow = cellHeight + rowSpacing
+        let perRow = (cellHeight + rowSpacing) * scale
         let n = Int((usable / perRow).rounded(.down))
         return max(2, min(7, n))
     }

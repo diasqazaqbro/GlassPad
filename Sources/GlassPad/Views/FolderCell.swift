@@ -8,6 +8,7 @@ struct FolderCell: View {
     let apps: [InstalledApp]
     var isSelected: Bool
     var isOpen: Bool
+    var iconScale: CGFloat = 1
     var namespace: Namespace.ID
     var onOpen: () -> Void
 
@@ -53,11 +54,11 @@ struct FolderCell: View {
         if isOpen {
             // While expanded, the overlay panel owns the morph id — this tile must
             // not duplicate the glassEffectID, so render an empty placeholder.
-            Color.clear.frame(width: Metrics.iconSize, height: Metrics.iconSize)
+            Color.clear.frame(width: Metrics.iconSize * iconScale, height: Metrics.iconSize * iconScale)
         } else {
             miniGrid
                 .padding(Metrics.folderTilePadding)
-                .frame(width: Metrics.iconSize, height: Metrics.iconSize)
+                .frame(width: Metrics.iconSize * iconScale, height: Metrics.iconSize * iconScale)
                 .glassEffect(.regular, in: .rect(cornerRadius: Metrics.folderTileCornerRadius))
                 .glassEffectID(LaunchpadItem.folderItemID(folder.id), in: namespace)
         }

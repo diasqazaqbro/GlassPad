@@ -5,15 +5,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let model = LaunchpadModel()
     private lazy var overlay = OverlayWindowController(model: model)
-    private let settings = SettingsWindowController()
+    private lazy var settings = SettingsWindowController(model: model)
     private let watcher = AppDirectoryWatcher()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Background utility: no Dock icon, lives in the menu bar.
         NSApp.setActivationPolicy(.accessory)
-        setUpStatusItem()
+        if AppSettings.showMenuBarIcon {
+            setUpStatusItem()
+        } else {
+            // No menu-bar icon → the status menu (the only Settings entry point) is
+            // gone, so surface Settings on launch. Relaunching GlassPad is the
+            // documented way back in.
+            settings.show()
+        }
         model.loadApps()
         HotkeyManager.register { [weak self] in self?.overlay.toggle() }
+        overlay.onOpenSettings = { [weak self] in self?.settings.show() }
 
         // Live re-scan when apps are installed/removed.
         watcher.start(paths: AppDiscoveryService.searchPaths.map(\.path)) { [weak self] in
@@ -81,6 +89,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+        let reset = NSMenuItem(title: "Reset Layout…", action: #selector(resetLayoutFromMenu), keyEquivalent: "")
+        reset.target = self
+        menu.addItem(reset)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit GlassPad", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -94,4 +105,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleFromMenu() { overlay.toggle() }
     @objc private func openSettings() { settings.show() }
     @objc private func quit() { NSApp.terminate(nil) }
+
+    @objc private func resetLayoutFromMenu() { confirmAndResetLayout() }
+
+    /// Add/remove the menu-bar item to match the current setting. Called by Settings.
+    func applyMenuBarIconSetting() {
+        if AppSettings.showMenuBarIcon {
+            if statusItem == nil { setUpStatusItem() }
+        } else if let item = statusItem {
+            NSStatusBar.system.removeStatusItem(item)
+            statusItem = nil
+        }
+    }
+
+    /// Destructive — confirm before discarding folders and manual ordering.
+    func confirmAndResetLayout() {
+        let alert = NSAlert()
+        alert.messageText = "Reset Layout to Defaults?"
+        alert.informativeText = "Removes all folders and custom ordering. Apps stay installed; the grid returns to alphabetical order."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Reset")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            model.resetLayout()
+        }
+    }
 }

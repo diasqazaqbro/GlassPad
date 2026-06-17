@@ -7,6 +7,7 @@ struct AppCell: View {
     let app: InstalledApp
     var isSelected: Bool = false
     var isLaunching: Bool = false
+    var iconScale: CGFloat = 1
     var onLaunch: () -> Void
 
     @State private var icon: NSImage?
@@ -29,7 +30,7 @@ struct AppCell: View {
         Button(action: onLaunch) {
             VStack(spacing: 8) {
                 iconView
-                    .frame(width: Metrics.iconSize, height: Metrics.iconSize)
+                    .frame(width: Metrics.iconSize * iconScale, height: Metrics.iconSize * iconScale)
                 Text(app.name)
                     .font(.system(size: Metrics.labelFontSize))
                     .foregroundStyle(.white)

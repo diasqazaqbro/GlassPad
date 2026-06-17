@@ -81,8 +81,16 @@ struct LaunchpadView: View {
     /// backdrop (the live desktop); the black tint dims it.
     private var backdrop: some View {
         ZStack {
-            Rectangle().fill(.ultraThinMaterial)
-            Rectangle().fill(.black.opacity(Metrics.backdropDim))
+            if let wallpaper = model.wallpaper {
+                // Already blurred at capture time; the dim sits on top for legibility.
+                Image(nsImage: wallpaper)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+            } else {
+                Rectangle().fill(.ultraThinMaterial)
+            }
+            Rectangle().fill(.black.opacity(AppSettings.backdropDim))
         }
         .ignoresSafeArea()
         .contentShape(Rectangle())

@@ -10,6 +10,10 @@ final class OverlayWindowController {
     private var keyMonitor: Any?
     private(set) var isVisible = false
 
+    /// Opens Settings (set by AppDelegate) — invoked on ⌘, so Settings is always
+    /// reachable from the overlay, independent of the menu-bar icon.
+    var onOpenSettings: (() -> Void)?
+
     /// Bumped on every show() so a deferred launch-dismiss scheduled for an older
     /// summon can't hide a window the user just re-opened.
     private var generation = 0
@@ -45,6 +49,27 @@ final class OverlayWindowController {
         }
         installKeyMonitor()
         isVisible = true
+        captureWallpaperIfEnabled(on: screen, window: window)
+    }
+
+    /// When "use wallpaper" is on, grab a blurred snapshot of this screen (minus
+    /// our own window) off-main and hand it to the model; otherwise clear it so the
+    /// material backdrop shows. Guarded by generation so a stale capture from a
+    /// previous summon can't land on a newer one.
+    private func captureWallpaperIfEnabled(on screen: NSScreen, window: NSWindow) {
+        guard AppSettings.useWallpaper else {
+            model.wallpaper = nil
+            return
+        }
+        let gen = generation
+        let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+            .uint32Value ?? CGMainDisplayID()
+        let windowID = CGWindowID(window.windowNumber)
+        Task { [weak self] in
+            let captured = await WallpaperCaptureService.captureBlurred(displayID: displayID, excludingWindowID: windowID)
+            guard let self, self.generation == gen, self.isVisible else { return }
+            self.model.wallpaper = captured?.image
+        }
     }
 
     /// Dismiss after a short beat so a launch pop is visible, but only if this
@@ -132,6 +157,14 @@ final class OverlayWindowController {
 
     /// Returns nil to consume the event, or the event to pass it through.
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        // ⌘, opens Settings from anywhere in the overlay — a robust path that
+        // doesn't depend on finding the menu-bar icon.
+        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "," {
+            hide()
+            onOpenSettings?()
+            return nil
+        }
+
         // With a folder open, route keys around the modal: Esc ends a rename (or
         // closes the folder), arrows move the rename caret while editing, and Tab
         // never cycles focus through the folder's app buttons.

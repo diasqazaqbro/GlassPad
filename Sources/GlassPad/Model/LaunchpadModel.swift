@@ -25,6 +25,10 @@ final class LaunchpadModel {
     /// The folder currently expanded in the morph overlay (nil = none).
     var openFolder: Folder?
 
+    /// Blurred desktop capture for the backdrop, when "use wallpaper" is on.
+    /// Refreshed per summon; nil falls back to the material backdrop.
+    var wallpaper: NSImage?
+
     /// The item id currently "popping" as it launches (for the launch animation).
     var launchingItemID: String?
 
@@ -347,6 +351,15 @@ final class LaunchpadModel {
     func persist() {
         // LayoutStore serializes the write on its own queue, in call order.
         LayoutStore.save(Self.makeStoredLayout(from: items))
+    }
+
+    /// Discard all folders and manual ordering: delete the saved layout and
+    /// re-scan. The `.missing` load branch reconciles to alphabetical and writes a
+    /// fresh layout. Apps stay installed — only the arrangement resets.
+    func resetLayout() {
+        try? FileManager.default.removeItem(at: LayoutStore.fileURL)
+        openFolder = nil
+        loadApps()
     }
 
     private func clampPage() {

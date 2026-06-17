@@ -1,37 +1,32 @@
 import SwiftUI
 
-/// Horizontally paged grid of launcher items (apps + folders). Paging stays in
-/// sync across swipe, dots, and keyboard via `scrollPosition` ↔ `model.currentPage`.
 struct PagedGrid: View {
     @Bindable var model: LaunchpadModel
     var namespace: Namespace.ID
     var onLaunch: (InstalledApp) -> Void
 
     @State private var scrolledPage: Int?
-    /// The page the swipe *began* on — captured the instant scrolling leaves idle,
-    /// before `scrollPosition`/`currentPage` advance mid-drag. The flick decision
-    /// is taken relative to this fixed anchor, so it always turns exactly one page
-    /// (no double-count, no jitter on rapid swipes).
-    @State private var dragStartPage = 0
+    @State private var syncingFromModel = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
-            let cols = Metrics.columnCount(forWidth: geo.size.width)
-            let rows = Metrics.rowCount(forHeight: geo.size.height)
+            let scale = AppSettings.gridDensity.scale
+            let cols = Metrics.columnCount(forWidth: geo.size.width, scale: scale)
+            let rows = Metrics.rowCount(forHeight: geo.size.height, scale: scale)
 
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     ForEach(Array(model.pages.enumerated()), id: \.offset) { index, items in
-                        PageView(items: items, model: model, namespace: namespace, onLaunch: onLaunch)
+                        PageView(items: items, model: model, namespace: namespace, iconScale: scale, onLaunch: onLaunch)
                             .frame(width: geo.size.width)
                             .id(index)
                     }
                 }
                 .scrollTargetLayout()
             }
-            .scrollTargetBehavior(PageFlickBehavior(fromPage: dragStartPage, pageCount: model.pageCount))
-            .scrollPosition(id: $scrolledPage)
+            .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
+            .scrollPosition(id: $scrolledPage, anchor: .center)
             .scrollIndicators(.hidden)
             .scrollClipDisabled()
             .overlay {
@@ -44,75 +39,34 @@ struct PagedGrid: View {
             .onAppear {
                 model.setGrid(columns: cols, rows: rows)
                 scrolledPage = model.currentPage
-                dragStartPage = model.currentPage
-            }
-            .onScrollPhaseChange { oldPhase, newPhase, context in
-                // Snapshot the page the gesture starts from, the moment scrolling
-                // leaves idle — so the flick is measured from a fixed anchor.
-                guard oldPhase == .idle, newPhase != .idle else { return }
-                let width = context.geometry.containerSize.width
-                guard width > 0 else { return }
-                dragStartPage = Int((context.geometry.contentOffset.x / width).rounded())
             }
             .onChange(of: cols) { model.setGrid(columns: cols, rows: rows) }
             .onChange(of: rows) { model.setGrid(columns: cols, rows: rows) }
             .onChange(of: scrolledPage) { _, new in
-                if let new, new != model.currentPage { model.currentPage = new }
+                guard !syncingFromModel, let new, new != model.currentPage else { return }
+                model.currentPage = new
             }
             .onChange(of: model.currentPage) { _, new in
-                if scrolledPage != new {
-                    withAnimation(reduceMotion ? nil : Metrics.pop) { scrolledPage = new }
-                }
+                guard scrolledPage != new else { return }
+                syncingFromModel = true
+                withAnimation(reduceMotion ? nil : Metrics.pop) { scrolledPage = new }
+                DispatchQueue.main.async { syncingFromModel = false }
             }
         }
     }
 }
 
-/// Snap-to-page behaviour tuned for a *light* flick, measured from the page the
-/// swipe began on (`fromPage`). The system `.paging`/`.viewAligned` behaviours
-/// need a near-half-page drag; this turns exactly one page (Launchpad-style) on a
-/// small displacement or a gentle velocity, and never more than one — so a soft
-/// two-finger swipe is enough and rapid swipes stay stable.
-private struct PageFlickBehavior: ScrollTargetBehavior {
-    let fromPage: Int
-    let pageCount: Int
-
-    /// Fraction of a page the gesture must head toward to commit the turn.
-    private let displacement: CGFloat = 0.08
-    /// Points/second that count as a deliberate flick even with little drag.
-    private let velocityFlick: CGFloat = 60
-
-    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
-        let pageWidth = context.containerSize.width
-        guard pageWidth > 0 else { return }
-
-        let proposed = target.rect.minX / pageWidth
-        let movement = proposed - CGFloat(fromPage)
-        let velocity = context.velocity.dx
-
-        var destination = fromPage
-        if movement > displacement || velocity > velocityFlick {
-            destination = fromPage + 1
-        } else if movement < -displacement || velocity < -velocityFlick {
-            destination = fromPage - 1
-        }
-
-        destination = min(max(destination, 0), max(0, pageCount - 1))
-        target.rect.origin.x = CGFloat(destination) * pageWidth
-    }
-}
-
-/// A single page: a grid of `model.columns` columns, top-aligned and centered.
 private struct PageView: View {
     let items: [LaunchpadItem]
     @Bindable var model: LaunchpadModel
     var namespace: Namespace.ID
+    var iconScale: CGFloat
     var onLaunch: (InstalledApp) -> Void
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: Metrics.rowSpacing) {
             ForEach(items) { item in
-                ItemCell(item: item, model: model, namespace: namespace, onLaunch: onLaunch)
+                ItemCell(item: item, model: model, namespace: namespace, iconScale: iconScale, onLaunch: onLaunch)
             }
         }
         .padding(.horizontal, Metrics.gridHorizontalMargin)
@@ -120,19 +74,15 @@ private struct PageView: View {
     }
 
     private var columns: [GridItem] {
-        Array(
-            repeating: GridItem(.flexible(), spacing: Metrics.columnSpacing, alignment: .top),
-            count: model.columns
-        )
+        Array(repeating: GridItem(.flexible(), spacing: Metrics.columnSpacing, alignment: .top), count: model.columns)
     }
 }
 
-/// Wraps an app/folder cell with drag-and-drop. Dropping onto a cell's center
-/// makes/extends a folder; dropping near the left/right edge reorders.
 private struct ItemCell: View {
     let item: LaunchpadItem
     @Bindable var model: LaunchpadModel
     var namespace: Namespace.ID
+    var iconScale: CGFloat
     var onLaunch: (InstalledApp) -> Void
 
     @State private var width: CGFloat = Metrics.cellWidth
@@ -152,19 +102,9 @@ private struct ItemCell: View {
     private var content: some View {
         switch item {
         case .app(let app):
-            AppCell(
-                app: app,
-                isSelected: model.selectedItemID == item.id,
-                isLaunching: model.launchingItemID == item.id
-            ) { onLaunch(app) }
+            AppCell(app: app, isSelected: model.selectedItemID == item.id, isLaunching: model.launchingItemID == item.id, iconScale: iconScale) { onLaunch(app) }
         case .folder(let folder):
-            FolderCell(
-                folder: folder,
-                apps: model.resolvedApps(in: folder),
-                isSelected: model.selectedItemID == item.id,
-                isOpen: model.openFolder?.id == folder.id,
-                namespace: namespace
-            ) {
+            FolderCell(folder: folder, apps: model.resolvedApps(in: folder), isSelected: model.selectedItemID == item.id, isOpen: model.openFolder?.id == folder.id, iconScale: iconScale, namespace: namespace) {
                 withAnimation(reduceMotion ? nil : Metrics.morph) { model.openFolder = folder }
             }
         }
@@ -173,20 +113,14 @@ private struct ItemCell: View {
     @ViewBuilder
     private var dragPreview: some View {
         switch item {
-        case .app(let app):
-            DragPreview(path: app.id)
-        case .folder:
-            Image(systemName: "folder.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.white)
+        case .app(let app): DragPreview(path: app.id)
+        case .folder: Image(systemName: "folder.fill").font(.system(size: 48)).foregroundStyle(.white)
         }
     }
 
     private var widthReader: some View {
         GeometryReader { proxy in
-            Color.clear
-                .onAppear { width = proxy.size.width }
-                .onChange(of: proxy.size.width) { _, w in width = w }
+            Color.clear.onAppear { width = proxy.size.width }.onChange(of: proxy.size.width) { _, w in width = w }
         }
     }
 
@@ -198,50 +132,32 @@ private struct ItemCell: View {
     }
 }
 
-/// Shown when a search matches nothing.
 private struct EmptyResultsView: View {
     let query: String
-
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.white.opacity(0.6))
-            Text("No results for “\(query)”")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.white.opacity(0.85))
-        }
-        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+            Image(systemName: "magnifyingglass").font(.system(size: 48, weight: .light)).foregroundStyle(.white.opacity(0.6))
+            Text("No results for “\(query)”").font(.system(size: 18, weight: .medium)).foregroundStyle(.white.opacity(0.85))
+        }.shadow(color: .black.opacity(0.4), radius: 3, y: 1)
     }
 }
 
-/// Shown after a scan finds no installed apps at all (distinct from a search miss).
 private struct NoAppsView: View {
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "square.grid.3x3")
-                .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.white.opacity(0.6))
-            Text("No apps found")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.white.opacity(0.85))
-        }
-        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+            Image(systemName: "square.grid.3x3").font(.system(size: 48, weight: .light)).foregroundStyle(.white.opacity(0.6))
+            Text("No apps found").font(.system(size: 18, weight: .medium)).foregroundStyle(.white.opacity(0.85))
+        }.shadow(color: .black.opacity(0.4), radius: 3, y: 1)
     }
 }
 
-/// Icon-sized drag image.
 private struct DragPreview: View {
     let path: String
     @State private var icon: NSImage?
-
     var body: some View {
         Group {
-            if let icon {
-                Image(nsImage: icon).resizable().interpolation(.high).scaledToFit()
-            } else {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.2))
-            }
+            if let icon { Image(nsImage: icon).resizable().interpolation(.high).scaledToFit() }
+            else { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.2)) }
         }
         .frame(width: 72, height: 72)
         .task(id: path) { icon = await IconLoader.shared.icon(forPath: path) }

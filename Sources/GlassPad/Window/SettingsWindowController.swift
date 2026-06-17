@@ -5,12 +5,17 @@ import SwiftUI
 /// can still present and key a normal window after activating.
 @MainActor
 final class SettingsWindowController {
+    private let model: LaunchpadModel
     private var window: NSWindow?
+
+    init(model: LaunchpadModel) {
+        self.model = model
+    }
 
     func show() {
         if window == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 440, height: 220),
+                contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
@@ -18,7 +23,7 @@ final class SettingsWindowController {
             window.title = "GlassPad Settings"
             window.isReleasedWhenClosed = false
             window.center()
-            let host = NSHostingView(rootView: SettingsView())
+            let host = NSHostingView(rootView: SettingsView(model: model))
             window.contentView = host
             window.setContentSize(host.fittingSize)
             self.window = window
