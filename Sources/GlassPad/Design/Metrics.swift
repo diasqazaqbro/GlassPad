@@ -49,6 +49,12 @@ enum Metrics {
     static var searchAreaHeight: CGFloat { searchTopPadding + searchPillHeight + searchBottomPadding }
     static let pageDotsAreaHeight: CGFloat = 64
 
+    /// The grid's top inset — the single source used by BOTH `LaunchpadView.grid`'s
+    /// top padding AND the model's reorder slot math (`slotIndex`/`slotCenterGlobal`),
+    /// so the gridSpace→page-local row mapping can never silently drift from the
+    /// visual layout. Equals the search-chrome height by definition.
+    static var gridTopInset: CGFloat { searchAreaHeight }
+
     // MARK: - Search pill
     static let searchPillWidth: CGFloat = 360
     static let searchPillHeight: CGFloat = 44
@@ -93,4 +99,33 @@ enum Metrics {
     static let appearScaleFrom: CGFloat = 0.96
     static let launchPopScale: CGFloat = 1.22
     static let launchDismissDelay: TimeInterval = 0.13
+
+    // MARK: - Drag-to-reorder (live reflow)
+    /// Spring the grid cells use to glide to a new slot when the live drag changes
+    /// the insertion index. Keyed on `model.reorderRevision` (NOT currentPage), so it
+    /// can never animate the pager offset — that stays on `pageSpring` on the outer
+    /// HStack. Snappy + lightly damped so cells part to make room cleanly.
+    static let reorderSpring = Animation.spring(response: 0.3, dampingFraction: 0.82)
+    /// How much the lifted (floating) icon grows while being dragged.
+    static let dragLiftScale: CGFloat = 1.15
+    /// Distance (points) from the left/right screen edge that arms a page flip while
+    /// dragging an icon, so you can carry it across pages like real Launchpad.
+    static let edgeFlipBand: CGFloat = 64
+    /// How long the cursor must dwell in the edge band before the page flips.
+    static let edgeFlipDwell: TimeInterval = 0.55
+    /// Cursor-to-cell-center distance that arms a folder merge instead of a reflow
+    /// (small, so only a deliberate hover over a tile's center makes a folder).
+    static let folderMergeRadius: CGFloat = 40
+    /// Highlight strength on the tile the drag will merge into.
+    static let folderTargetHighlightOpacity: Double = 0.26
+
+    // MARK: - File search (Spotlight)
+    /// Max file hits shown in the Files section of search results.
+    static let fileResultLimit: Int = 24
+    /// Debounce (ms) before a keystroke kicks off a Spotlight query.
+    static let spotlightDebounceMS: Int = 180
+    /// Section header + file-path-subtitle type sizes in search results.
+    static let searchSectionFontSize: CGFloat = 15
+    static let fileSubtitleFontSize: CGFloat = 11
+    static let searchSectionSpacing: CGFloat = 30
 }

@@ -25,6 +25,14 @@ Services produce data → `LaunchpadModel` (`@Observable`) holds it → SwiftUI 
 One commit per phase, conventional-commit messages. Each phase must build, run, and be visually verifiable.
 
 ## Current status
-All build phases complete (Phase 0–5). `swift build` is clean under Swift 6 strict
+All build phases complete (Phase 0–6). `swift build` is clean under Swift 6 strict
 concurrency; `Scripts/make-app-bundle.sh` produces a runnable `dist/GlassPad.app`.
 Dependency: `KeyboardShortcuts` (global hotkey, default ⌥Space, rebindable in Settings).
+
+Phase 6 added **live-reflow drag-to-reorder** (position-based `ZStack` per page so cells
+glide across rows; floating `DragFloater`; edge-of-screen page-flip; folder merge on
+center-dwell — all on a one-finger `DragGesture` that's a disjoint event stream from the
+two-finger scroll-wheel pager) and **Spotlight whole-Mac file search + web search** (the
+search pill now also lists files via `NSMetadataQuery` and offers a "search the web" row;
+results render in `SearchResultsView`, which replaces the pager while searching). File
+hits live in a separate `fileResults` array — never in `items`/`LayoutStore`.

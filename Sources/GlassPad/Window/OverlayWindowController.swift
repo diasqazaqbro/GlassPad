@@ -230,6 +230,20 @@ final class OverlayWindowController {
     /// also scrolls something underneath), or the event to pass it through (a
     /// vertical scroll, a legacy mouse wheel, or anything while a folder is open).
     private func handleScroll(_ event: NSEvent) -> NSEvent? {
+        // While a reorder drag is live, paging is suppressed: an edge-flip (which the
+        // drag drives by animating currentPage directly) and a concurrent two-finger
+        // swipe would both write currentPage and fight. End any stray in-flight swipe
+        // and pass the event through.
+        guard model.draggingItemID == nil else {
+            if swipeActive { swipeActive = false; model.endPaging(velocity: 0) }
+            return event
+        }
+
+        // While searching, the content is the vertical SearchResultsView (the pager
+        // isn't in the tree). Pass scrolls straight through so the list scrolls and the
+        // pager state machine is never entered.
+        guard !model.searching else { return event }
+
         // While a folder is open, paging is suppressed; pass the event through so the
         // open folder's own content can scroll. End any in-flight swipe cleanly.
         guard model.openFolder == nil else {

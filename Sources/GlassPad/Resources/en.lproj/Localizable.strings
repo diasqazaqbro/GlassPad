@@ -72,3 +72,10 @@
 "statusItem.label" = "GlassPad";
 "results.empty" = "No results for “%@”";
 "apps.empty" = "No apps found";
+
+/* Search results sections + file/web rows */
+"search.section.apps" = "Apps";
+"search.section.files" = "Files";
+"search.web" = "Search the web for “%@”";
+"search.file.a11y" = "%@, file";
+"search.file.hint" = "Opens the file";

@@ -21,6 +21,11 @@ import SwiftUI
 /// container — the swipe-smooth path. The folder's full-screen dim sits above the
 /// chrome but below the panel.
 struct LaunchpadView: View {
+    /// Shared coordinate space anchoring the root ZStack: cell reorder `DragGesture`s
+    /// report their cursor here and the floating `DragFloater` is positioned here, so
+    /// the two always agree on one frame.
+    static let gridSpace = "gridSpace"
+
     @Bindable var model: LaunchpadModel
     var onDismiss: () -> Void
     var onOpenSettings: () -> Void
@@ -34,14 +39,28 @@ struct LaunchpadView: View {
         ZStack {
             backdrop
 
-            // The scrolling grid. While no folder is open it is a bare sibling — NOT
+            // The content layer. While no folder is open it is a bare sibling — NOT
             // inside any GlassEffectContainer — so a swipe never recomputes glass
             // behind the moving icons (the smooth path). While a folder IS open the
             // grid is static, so it is wrapped (with the FolderOverlay panel) in one
             // shared container below; in that state its open-folder tile is real glass
             // (`useLiveGlass`) and co-contained with the panel for a clean morph.
+            //
+            // While searching we swap the paged grid out entirely for the vertical
+            // SearchResultsView — the custom pager is then not even in the tree, so it
+            // can't be perturbed by the search UI.
             if model.openFolder == nil {
-                grid
+                if model.searching {
+                    SearchResultsView(
+                        model: model,
+                        namespace: glassNamespace,
+                        onLaunch: { launchAndDismiss($0) },
+                        onOpenFile: { openFileAndDismiss($0) },
+                        onSearchWeb: { model.searchWeb(model.query); onDismiss() }
+                    )
+                } else {
+                    grid
+                }
             }
 
             // Functional chrome: its own container, static during a swipe → one
@@ -55,10 +74,13 @@ struct LaunchpadView: View {
 
                         Spacer(minLength: 0)
 
-                        PageDots(count: model.pageCount, current: model.currentPage) { page in
-                            model.goToPage(page)
+                        // Page dots are meaningless for the vertical search list.
+                        if !model.searching {
+                            PageDots(count: model.pageCount, current: model.currentPage) { page in
+                                model.goToPage(page)
+                            }
+                            .frame(height: Metrics.pageDotsAreaHeight)
                         }
-                        .frame(height: Metrics.pageDotsAreaHeight)
                     }
 
                     if model.openFolder == nil {
@@ -97,7 +119,15 @@ struct LaunchpadView: View {
                     }
                 }
             }
+
+            // The lifted icon during a reorder drag — LAST sibling, so it floats above
+            // everything, OUTSIDE the pager's clip and any glass container, and can
+            // travel across pages. Gated off while a folder is open (no reorder there).
+            if model.draggingItemID != nil, model.openFolder == nil {
+                DragFloater(model: model, iconScale: AppSettings.gridDensity.scale)
+            }
         }
+        .coordinateSpace(.named(Self.gridSpace))
         .scaleEffect(appeared ? 1 : Metrics.appearScaleFrom)
         .onAppear {
             model.resetTransientState()
@@ -118,7 +148,7 @@ struct LaunchpadView: View {
         PagedGrid(model: model, namespace: glassNamespace, useLiveGlass: model.openFolder != nil) { app in
             launchAndDismiss(app)
         }
-        .padding(.top, Metrics.searchAreaHeight)
+        .padding(.top, Metrics.gridTopInset)
         .padding(.bottom, Metrics.pageDotsAreaHeight)
     }
 
@@ -130,6 +160,12 @@ struct LaunchpadView: View {
     /// guarded there) so the launch animation reads and a fast re-summon is safe.
     private func launchAndDismiss(_ app: InstalledApp) {
         model.launch(app)
+        onDismiss()
+    }
+
+    /// Open a file hit with its default app, then dismiss the overlay.
+    private func openFileAndDismiss(_ file: FileResult) {
+        model.openFile(file)
         onDismiss()
     }
 

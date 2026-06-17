@@ -65,6 +65,59 @@ final class LaunchpadModel {
     /// the scroll monitor can do commit-fraction + rubber-band math in real units.
     var pageWidth: CGFloat = 1
 
+    // MARK: - Live-reflow drag-to-reorder state
+    //
+    // A reorder drag is a ONE-finger left-mouse click-drag (a SwiftUI DragGesture on
+    // the cell) — a different NSEvent stream from the two-finger `.scrollWheel` swipe
+    // that drives paging, so the two can never contend. While a drag is live the grid
+    // renders `workingItems` (a scratch copy) so the user sees the reflow preview;
+    // `items` (the persisted source of truth) is only mutated on a committed drop.
+
+    /// The item currently lifted under the cursor (nil = no drag). Cells matching this
+    /// render at opacity 0 (the gap); the floating `DragFloater` shows the real icon.
+    var draggingItemID: String?
+    /// Live cursor position in the named "gridSpace" coordinate space (the overlay
+    /// root). Drives the `DragFloater`. Updated every pointer frame.
+    var dragCursor: CGPoint = .zero
+    /// Bumped ONLY when a live drag changes the insertion index. `PagedGrid` keys its
+    /// reflow `.animation` on this, so cells glide to new slots without the spring ever
+    /// firing on a page swipe (which changes `currentPage`, never this).
+    var reorderRevision = 0
+    /// The tile a release will merge INTO (create/extend a folder) instead of
+    /// reflowing — set while the cursor dwells near a legal target's center.
+    var folderTargetID: String?
+
+    /// Scratch reorder copy; `nil` when no drag is in flight. Observation-ignored: it's
+    /// internal bookkeeping, not something the UI observes directly (it reads the
+    /// derived `displayedItems`/`pages`).
+    @ObservationIgnored private var workingItems: [LaunchpadItem]?
+    /// Last committed insertion index, to coalesce pointer frames so we don't rebuild
+    /// pages 60×/sec when the cursor stays within one slot.
+    @ObservationIgnored private var lastTargetIndex: Int?
+    /// Pending edge-flip (arms when the cursor dwells in the edge band). Cancelled when
+    /// the cursor leaves the band, on drop, and on overlay dismiss.
+    @ObservationIgnored private var edgeFlipTask: Task<Void, Never>?
+
+    /// The lifted item resolved for the floating drag layer (icon resolved by the view).
+    var draggingItem: LaunchpadItem? {
+        guard let id = draggingItemID else { return nil }
+        return (workingItems ?? items).first { $0.id == id }
+    }
+
+    // MARK: - File search (Spotlight) state
+
+    /// File hits for the current query (Spotlight). Kept in a SEPARATE array — never
+    /// folded into `items`/`displayedItems` — so a file can never reach the saved
+    /// layout (it isn't even expressible as a `LaunchpadItem`). Cleared on dismiss.
+    private(set) var fileResults: [FileResult] = []
+
+    @ObservationIgnored private let spotlight = SpotlightSearchService()
+    @ObservationIgnored private var searchDebounceTask: Task<Void, Never>?
+    @ObservationIgnored private var didWireSpotlight = false
+
+    /// Stable id for the "search the web" action row, so it can be keyboard-selected.
+    static let webSearchSelectionID = "web:search"
+
     /// True once the first app scan has completed, so the UI can tell "still
     /// loading" (show nothing) apart from "genuinely no apps" (show empty state).
     private(set) var didLoad = false
@@ -145,6 +198,12 @@ final class LaunchpadModel {
 
             // A newer load superseded this one — drop our (possibly stale) results.
             guard generation == self.loadGeneration else { return }
+
+            // A live re-scan (AppDirectoryWatcher fired mid-drag) invalidates the drag's
+            // basis: the reconcile below rewrites `items`, and the rebuild would clobber
+            // the live workingItems preview. Cancel the drag first — the correct
+            // semantic when the layout's source of truth changes underneath it.
+            if self.draggingItemID != nil { self.cancelReorder() }
 
             self.apps = discovered
             self.appsByID = Dictionary(discovered.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -263,12 +322,27 @@ final class LaunchpadModel {
     func handleQueryChange() {
         rebuildDisplayedItems()
         currentPage = 0
-        selectedItemID = (searching && !displayedItems.isEmpty) ? displayedItems[0].id : nil
+        scheduleSpotlightSearch()
+        // Default the keyboard selection to the first result (matched apps first).
+        let ids = searchSelectionIDs
+        selectedItemID = (searching && !ids.isEmpty) ? ids.first : nil
+    }
+
+    /// Flat keyboard-navigation order while searching: matched apps, then Spotlight
+    /// file hits, then the "search the web" action. Files & web use plain string ids
+    /// (NOT `LaunchpadItem`s) so they can never reach the saved layout.
+    var searchSelectionIDs: [String] {
+        guard searching else { return [] }
+        var ids = displayedItems.map(\.id)                       // matched apps
+        ids += fileResults.map { FileResult.selectionID($0.id) } // file hits
+        ids.append(Self.webSearchSelectionID)                    // search-the-web row
+        return ids
     }
 
     /// Left/Right walk the displayed items in reading order (pages flip naturally).
     /// Up/Down move by a full row, staying within the visible page.
     func move(_ direction: MoveDirection) {
+        if searching { moveInSearch(direction); return }
         let all = displayedItems
         guard !all.isEmpty else { return }
         let cap = pageCapacity
@@ -296,10 +370,29 @@ final class LaunchpadModel {
         currentPage = target / cap
     }
 
-    /// Activate the selection (or the top hit while searching): launch an app, or
-    /// open a folder. Returns true if the overlay should dismiss.
+    /// Up/Down step by the search grid's column count; Left/Right walk one result.
+    /// The flat `searchSelectionIDs` order spans apps → files → web, so arrows cross
+    /// the section boundaries naturally (both grids are pinned to `columns`).
+    private func moveInSearch(_ direction: MoveDirection) {
+        let ids = searchSelectionIDs
+        guard !ids.isEmpty else { return }
+        let cols = max(1, columns)
+        let cur = selectedItemID.flatMap { ids.firstIndex(of: $0) } ?? 0
+        var target = cur
+        switch direction {
+        case .left:  target = max(0, cur - 1)
+        case .right: target = min(ids.count - 1, cur + 1)
+        case .up:    target = max(0, cur - cols)
+        case .down:  target = min(ids.count - 1, cur + cols)
+        }
+        selectedItemID = ids[target]
+    }
+
+    /// Activate the selection (or the top hit while searching): launch an app, open a
+    /// folder, open a file, or run a web search. Returns true if the overlay dismisses.
     @discardableResult
     func activateSelected() -> Bool {
+        if searching { return activateSearchSelection() }
         let all = displayedItems
         let index = selectedIndex ?? (all.isEmpty ? nil : 0)
         guard let index, all.indices.contains(index) else { return false }
@@ -313,6 +406,29 @@ final class LaunchpadModel {
         }
     }
 
+    private func activateSearchSelection() -> Bool {
+        let ids = searchSelectionIDs
+        guard let id = selectedItemID ?? ids.first else { return false }
+        if id == Self.webSearchSelectionID {
+            searchWeb(query)
+            return true
+        }
+        if let path = FileResult.path(fromSelectionID: id),
+           let file = fileResults.first(where: { $0.id == path }) {
+            openFile(file)
+            return true
+        }
+        if let item = displayedItems.first(where: { $0.id == id }), case .app(let app) = item {
+            launch(app)
+            return true
+        }
+        if case .app(let app)? = displayedItems.first {  // fallback: top app hit
+            launch(app)
+            return true
+        }
+        return false
+    }
+
     func launch(_ app: InstalledApp) {
         withAnimation(Metrics.reduceMotion ? nil : Metrics.pop) {
             launchingItemID = LaunchpadItem.appItemID(app.id)
@@ -323,6 +439,11 @@ final class LaunchpadModel {
     /// Reset transient launcher state so each summon opens clean (no leftover
     /// search query, expanded folder, selection, or page).
     func resetTransientState() {
+        cancelReorder()
+        searchDebounceTask?.cancel()
+        searchDebounceTask = nil
+        spotlight.stop()
+        fileResults = []
         launchingItemID = nil
         query = ""
         openFolder = nil
@@ -331,6 +452,53 @@ final class LaunchpadModel {
         dragTranslation = 0
         isPaging = false
         rebuildDisplayedItems()
+    }
+
+    // MARK: - File / web search
+
+    private func wireSpotlightIfNeeded() {
+        guard !didWireSpotlight else { return }
+        didWireSpotlight = true
+        spotlight.onResults = { [weak self] results in self?.applyFileResults(results) }
+    }
+
+    /// Debounced: a burst of keystrokes kicks off at most one Spotlight query. An empty
+    /// query stops the live query and clears results immediately.
+    private func scheduleSpotlightSearch() {
+        wireSpotlightIfNeeded()
+        searchDebounceTask?.cancel()
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else {
+            fileResults = []
+            spotlight.search("")
+            return
+        }
+        searchDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Metrics.spotlightDebounceMS))
+            guard !Task.isCancelled, let self else { return }
+            self.spotlight.search(q)
+        }
+    }
+
+    /// Late callbacks (query already cleared) are dropped so stale hits never flash.
+    private func applyFileResults(_ results: [FileResult]) {
+        guard searching else { fileResults = []; return }
+        fileResults = results
+    }
+
+    /// Open a file hit with its default app (the view dismisses the overlay after).
+    func openFile(_ file: FileResult) {
+        NSWorkspace.shared.open(file.url)
+    }
+
+    /// Send the current query to a web search in the default browser.
+    func searchWeb(_ rawQuery: String) {
+        let q = rawQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty,
+              let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://www.google.com/search?q=\(encoded)")
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: - Drag & drop (reorder / folders)
@@ -403,6 +571,181 @@ final class LaunchpadModel {
 
     private func indexOfFolder(_ id: UUID) -> Int? {
         items.firstIndex { if case .folder(let f) = $0 { return f.id == id } else { return false } }
+    }
+
+    // MARK: - Live-reflow reorder
+    //
+    // The view feeds these from a per-cell DragGesture in the named "gridSpace". While
+    // the drag is live we mutate a `workingItems` scratch copy and publish it through
+    // `displayedItems`/`pages` so cells glide to new slots; `items` (persisted truth)
+    // changes only on a committed drop. NONE of this touches the scroll-wheel pager's
+    // state machine — the edge-flip animates `currentPage` directly via `pageSpring`.
+
+    /// Begin lifting `id` at the cursor. No-op while searching or a folder is open.
+    func beginReorder(id: String, at cursor: CGPoint) {
+        guard !searching, openFolder == nil, items.contains(where: { $0.id == id }) else { return }
+        draggingItemID = id
+        dragCursor = cursor
+        workingItems = items
+        lastTargetIndex = items.firstIndex { $0.id == id }
+        folderTargetID = nil
+    }
+
+    /// Live pointer update: re-arm the edge flip, decide folder-merge vs reflow, and
+    /// move the dragged item to the slot under the cursor (coalesced so we only rebuild
+    /// pages when the target slot actually changes).
+    func updateReorder(cursor: CGPoint) {
+        guard draggingItemID != nil, var working = workingItems else { return }
+        dragCursor = cursor
+        armOrCancelEdgeFlip(cursorX: cursor.x)
+
+        if let target = folderMergeTarget(at: cursor, in: working) {
+            if folderTargetID != target { folderTargetID = target }
+            return // hold the gap; a release here makes/extends a folder
+        } else if folderTargetID != nil {
+            folderTargetID = nil
+        }
+
+        guard let target = slotIndex(at: cursor, count: working.count), target != lastTargetIndex else { return }
+        lastTargetIndex = target
+        moveDragged(to: target, in: &working)
+        workingItems = working
+        displayedItems = working   // preview; do NOT call rebuildDisplayedItems (reads `items`)
+        rebuildPages()
+        reorderRevision += 1
+    }
+
+    /// Commit (or merge, or no-op) on release, then clear all drag state.
+    func endReorder() {
+        edgeFlipTask?.cancel(); edgeFlipTask = nil
+        let dragged = draggingItemID
+        let mergeTarget = folderTargetID
+        let working = workingItems
+        draggingItemID = nil
+        workingItems = nil
+        lastTargetIndex = nil
+        folderTargetID = nil
+        dragCursor = .zero
+
+        if let dragged, let mergeTarget {
+            // Reuse the existing merge path against `items` (rebuilds + persists itself).
+            _ = handleDrop(draggedID: dragged, ontoID: mergeTarget, region: .onto)
+            return
+        }
+        if let working, working.map(\.id) != items.map(\.id) {
+            items = working
+            rebuildDisplayedItems()
+            clampPage()
+            persist()
+        } else {
+            rebuildDisplayedItems() // snap preview back to the (unchanged) truth
+        }
+    }
+
+    /// Abort a drag with no commit (overlay dismissed mid-drag, etc.).
+    func cancelReorder() {
+        edgeFlipTask?.cancel(); edgeFlipTask = nil
+        guard draggingItemID != nil || workingItems != nil else { return }
+        draggingItemID = nil
+        workingItems = nil
+        lastTargetIndex = nil
+        folderTargetID = nil
+        dragCursor = .zero
+        rebuildDisplayedItems()
+    }
+
+    /// Move the dragged element to occupy visual slot `target` (an index into the full
+    /// array including the dragged item).
+    private func moveDragged(to target: Int, in working: inout [LaunchpadItem]) {
+        guard let id = draggingItemID, let from = working.firstIndex(where: { $0.id == id }) else { return }
+        let item = working.remove(at: from)
+        let dest = max(0, min(target, working.count))
+        working.insert(item, at: dest)
+    }
+
+    // MARK: Reorder geometry (mirrors PageView's equal-share layout)
+
+    /// Equal-share cell width: cells use `.frame(maxWidth:.infinity)` inside a margin,
+    /// so the pitch is (usableWidth − gaps)/cols, not a fixed cell box.
+    private func cellWidth(cols: Int) -> CGFloat {
+        let usable = pageWidth - Metrics.gridHorizontalMargin * 2
+        return (usable - CGFloat(cols - 1) * Metrics.columnSpacing) / CGFloat(cols)
+    }
+
+    /// Cursor (in gridSpace) → global item index on the current page.
+    private func slotIndex(at cursor: CGPoint, count: Int) -> Int? {
+        guard pageWidth > 1, columns > 0, rows > 0 else { return nil }
+        let cols = columns
+        let cw = cellWidth(cols: cols)
+        let pitchX = cw + Metrics.columnSpacing
+        let rowPitch = (Metrics.cellHeight + Metrics.rowSpacing) * AppSettings.gridDensity.scale
+        let localX = cursor.x - Metrics.gridHorizontalMargin
+        let localY = cursor.y - Metrics.gridTopInset
+        let col = min(max(0, Int((localX / pitchX).rounded(.down))), cols - 1)
+        let row = min(max(0, Int((localY / rowPitch).rounded(.down))), rows - 1)
+        let global = currentPage * pageCapacity + row * cols + col
+        return max(0, min(global, count - 1))
+    }
+
+    /// Center of the slot for a global index, in gridSpace (for folder-merge hit test).
+    private func slotCenterGlobal(forIndex global: Int) -> CGPoint {
+        let cols = max(1, columns)
+        let local = global - currentPage * pageCapacity
+        let cw = cellWidth(cols: cols)
+        let pitchX = cw + Metrics.columnSpacing
+        let rowPitch = (Metrics.cellHeight + Metrics.rowSpacing) * AppSettings.gridDensity.scale
+        let x = Metrics.gridHorizontalMargin + CGFloat(local % cols) * pitchX + cw / 2
+        let y = Metrics.gridTopInset + rowPitch * (CGFloat(local / cols) + 0.5)
+        return CGPoint(x: x, y: y)
+    }
+
+    /// If the cursor dwells near a legal target's center, return that target's id
+    /// (app→app makes a folder, app→folder adds in). Only apps can be merged in.
+    private func folderMergeTarget(at cursor: CGPoint, in working: [LaunchpadItem]) -> String? {
+        guard let id = draggingItemID,
+              case .app = working.first(where: { $0.id == id }),
+              let slot = slotIndex(at: cursor, count: working.count) else { return nil }
+        let target = working[slot]
+        guard target.id != id else { return nil }
+        let center = slotCenterGlobal(forIndex: slot)
+        guard hypot(cursor.x - center.x, cursor.y - center.y) < Metrics.folderMergeRadius else { return nil }
+        return target.id // .app or .folder — both legal merge targets for a dragged app
+    }
+
+    // MARK: Edge-flip while dragging
+
+    private func armOrCancelEdgeFlip(cursorX: CGFloat) {
+        let nearLeft = cursorX < Metrics.edgeFlipBand && currentPage > 0
+        let nearRight = cursorX > pageWidth - Metrics.edgeFlipBand && currentPage < pageCount - 1
+        guard nearLeft || nearRight else { edgeFlipTask?.cancel(); edgeFlipTask = nil; return }
+        guard edgeFlipTask == nil else { return }
+        let next = nearRight
+        edgeFlipTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(Metrics.edgeFlipDwell * 1000)))
+            guard !Task.isCancelled, let self else { return }
+            self.performEdgeFlip(next: next)
+        }
+    }
+
+    private func performEdgeFlip(next: Bool) {
+        edgeFlipTask = nil
+        let newPage = currentPage + (next ? 1 : -1)
+        guard newPage >= 0, newPage < pageCount else { return }
+        withAnimation(Metrics.reduceMotion ? nil : Metrics.pageSpring) { currentPage = newPage }
+        // Carry the dragged item onto the new page (front slot when advancing, back when
+        // retreating) so it stays under the cursor near the edge.
+        guard var working = workingItems, let id = draggingItemID,
+              let from = working.firstIndex(where: { $0.id == id }) else { return }
+        let base = newPage * pageCapacity
+        let raw = next ? base : min(base + pageCapacity - 1, working.count - 1)
+        let item = working.remove(at: from)
+        let dest = max(0, min(raw, working.count))
+        working.insert(item, at: dest)
+        workingItems = working
+        displayedItems = working
+        lastTargetIndex = dest
+        rebuildPages()
+        reorderRevision += 1
     }
 
     // MARK: - Persistence

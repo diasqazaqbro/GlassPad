@@ -18,19 +18,19 @@ import SwiftUI
 ///     renders *outside* any `GlassEffectContainer`, see `LaunchpadView`). The GPU
 ///     just composites ready pages — 60fps with zero stutter.
 ///
-///  2. **DRIVEN BY SCROLL-WHEEL, NOT A DRAGGESTURE.** The swipe is captured by an
+///  2. **DRIVEN BY SCROLL-WHEEL, COEXISTS WITH REORDER.** The swipe is captured by an
 ///     `NSEvent .scrollWheel` *local monitor* in `OverlayWindowController` — a
 ///     two-finger trackpad event stream. A local monitor sits **above** the
 ///     responder chain: it intercepts every scroll routed to the overlay *before*
 ///     any view hit-test, so it sees the swipe regardless of which SwiftUI cell is
 ///     under the cursor (a *background sibling* `NSView` would NOT — scroll is
 ///     routed by hit-test to the cell under the cursor and walks that cell's
-///     ancestors, never sideways to a sibling; and a *front* catcher that returned
-///     `hitTest → nil` would remove itself from scroll routing too). It is
-///     deliberately **not** a SwiftUI `DragGesture` (a one-finger drag), which would
-///     fight the per-cell `.draggable`. Trackpad scroll and click-drag are disjoint
+///     ancestors, never sideways to a sibling). Drag-to-reorder is a **one-finger
+///     left-mouse `DragGesture`** on each `ItemCell` (see below). A two-finger
+///     precise-scroll stream and a one-finger click-drag are physically disjoint
 ///     NSEvent streams, so the pager and the cell reorder can never contend for one
-///     gesture. The `.draggable`/`.dropDestination` on `ItemCell` are untouched.
+///     gesture — and `handleScroll` additionally suppresses paging while a reorder
+///     drag is live, so an edge-flip and a stray swipe can't both write `currentPage`.
 ///
 ///  3. **ONE PAGE PER SWIPE.** The monitor accumulates `scrollingDeltaX` while the
 ///     gesture is live and, on lift, commits to **at most ±1 page** by displacement
@@ -109,9 +109,10 @@ struct PagedGrid: View {
             .frame(width: pageWidth, height: geo.size.height, alignment: .leading)
             .clipped()
             .overlay {
-                if model.searching && model.displayedItems.isEmpty {
-                    EmptyResultsView(query: model.query)
-                } else if !model.searching && model.didLoad && model.displayedItems.isEmpty {
+                // Search results live in their own SearchResultsView (LaunchpadView
+                // swaps this whole grid out while searching), so here we only need the
+                // at-rest "no apps installed" empty state.
+                if !model.searching && model.didLoad && model.displayedItems.isEmpty {
                     NoAppsView()
                 }
             }
@@ -128,7 +129,22 @@ struct PagedGrid: View {
     }
 }
 
-/// A single page: a grid of `model.columns` columns, top-aligned and centered.
+/// A single page laid out by **computed slot position** (a `ZStack` of cells each at
+/// its `.position`), NOT nested VStack/HStack rows.
+///
+/// ## Why position-based, and why it's still swipe-safe
+///
+/// Nested rows cannot animate a *cross-row* move during reorder: a cell that moves
+/// from the end of one row to the start of the next is removed from one `HStack` and
+/// inserted into a different `ForEach` subtree — SwiftUI crossfades/pops it instead of
+/// sliding. With one `ForEach` of stable identities each driven by `.position(x:y:)`,
+/// a slot change interpolates x AND y together along a straight line — the real
+/// Launchpad glide. The layout is eager (every cell built once) and flat, so the
+/// outer `.offset` page-flip still composites a ready layer at 60fps.
+///
+/// The reflow spring is keyed on `model.reorderRevision` (bumped only when a live drag
+/// changes the insertion index), so it can NEVER fire on a page swipe (which changes
+/// `currentPage`, not the revision).
 private struct PageView: View {
     let items: [LaunchpadItem]
     @Bindable var model: LaunchpadModel
@@ -137,49 +153,50 @@ private struct PageView: View {
     var useLiveGlass: Bool
     var onLaunch: (InstalledApp) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        // Eager rows (VStack/HStack), NOT LazyVGrid: a lazy grid defers realizing
-        // its cells until they enter the viewport, which re-introduces a per-page
-        // hitch even with an eager outer HStack. Explicit rows are built immediately,
-        // so a flip composites a ready page.
-        let columnCount = max(1, model.columns)
-        let rows = stride(from: 0, to: items.count, by: columnCount).map {
-            Array(items[$0 ..< min($0 + columnCount, items.count)])
-        }
-        return VStack(spacing: Metrics.rowSpacing) {
-            ForEach(rows.indices, id: \.self) { r in
-                HStack(spacing: Metrics.columnSpacing) {
-                    ForEach(rows[r]) { item in
-                        ItemCell(item: item, model: model, namespace: namespace,
-                                 iconScale: iconScale, useLiveGlass: useLiveGlass, onLaunch: onLaunch)
-                            .frame(maxWidth: .infinity)
-                    }
-                    // Keep a short last row left-aligned (cells stay column-width).
-                    // maxHeight: 0 is essential — a plain Color.clear is greedy in
-                    // BOTH axes, so an unconstrained filler would stretch the row to
-                    // fill all remaining vertical space and push its one real cell to
-                    // the vertical center (the "lone icon floating low" bug).
-                    if rows[r].count < columnCount {
-                        ForEach(0 ..< (columnCount - rows[r].count), id: \.self) { _ in
-                            Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
-                        }
-                    }
+        GeometryReader { geo in
+            let cols = max(1, model.columns)
+            let margin = Metrics.gridHorizontalMargin
+            // Equal-share column pitch — cells used to be `.frame(maxWidth:.infinity)`
+            // inside a margin, so each column's share is (usable − gaps)/cols.
+            let cellW = (geo.size.width - margin * 2 - CGFloat(cols - 1) * Metrics.columnSpacing) / CGFloat(cols)
+            let pitchX = cellW + Metrics.columnSpacing
+            let rowPitch = (Metrics.cellHeight + Metrics.rowSpacing) * iconScale
+
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    let col = index % cols
+                    let row = index / cols
+                    ItemCell(item: item, model: model, namespace: namespace,
+                             iconScale: iconScale, useLiveGlass: useLiveGlass, onLaunch: onLaunch)
+                        .frame(width: cellW, height: rowPitch)
+                        .position(x: margin + CGFloat(col) * pitchX + cellW / 2,
+                                  y: rowPitch * (CGFloat(row) + 0.5))
+                        // The lifted item is invisible in-grid (its gap) — the floating
+                        // DragFloater in LaunchpadView shows the real icon at the cursor.
+                        .opacity(model.draggingItemID == item.id ? 0 : 1)
                 }
             }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            // Animate slot changes ONLY when a live drag bumps the revision — never on
+            // currentPage (that's the outer offset spring) and never on plain reloads.
+            .animation(reduceMotion ? nil : Metrics.reorderSpring, value: model.reorderRevision)
         }
-        .padding(.horizontal, Metrics.gridHorizontalMargin)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
-/// Wraps an app/folder cell with drag-and-drop. Dropping onto a cell's center
-/// makes/extends a folder; dropping near the left/right edge reorders.
+/// Wraps an app/folder cell with **live-reflow** drag-to-reorder.
 ///
-/// Drag-to-reorder coexists with the pager because paging is driven by a
-/// **scroll-wheel** (two-finger trackpad) event stream captured in
-/// `OverlayWindowController`, while a cell lift is a **one-finger click-drag**
-/// surfaced here as `.draggable`. The two are disjoint NSEvent streams, so there is
-/// no container gesture to swallow a cell's drag and nothing for the cell to fight.
+/// The reorder gesture is a one-finger left-mouse `DragGesture` reported in the shared
+/// `"gridSpace"` coordinate space. It coexists with everything because:
+///   • Paging is a two-finger `.scrollWheel` stream (a disjoint NSEvent stream owned by
+///     `OverlayWindowController`) — it can never contend with a click-drag.
+///   • A quick tap stays under the gesture's `minimumDistance`, so the inner `Button`
+///     still launches; only a deliberate drag (≥ threshold) lifts the cell.
+/// On the first qualifying move it calls `beginReorder`; subsequent moves reflow live;
+/// release commits (or merges into a folder). A glowing overlay marks a merge target.
 private struct ItemCell: View {
     let item: LaunchpadItem
     @Bindable var model: LaunchpadModel
@@ -188,17 +205,29 @@ private struct ItemCell: View {
     var useLiveGlass: Bool
     var onLaunch: (InstalledApp) -> Void
 
-    @State private var width: CGFloat = Metrics.cellWidth
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         content
-            .background(widthReader)
-            .draggable(item.id) { dragPreview }
-            .dropDestination(for: String.self) { dropped, location in
-                guard let id = dropped.first else { return false }
-                return model.handleDrop(draggedID: id, ontoID: item.id, region: region(forX: location.x))
+            .overlay {
+                if model.folderTargetID == item.id {
+                    RoundedRectangle(cornerRadius: Metrics.cellCornerRadius, style: .continuous)
+                        .fill(.white.opacity(Metrics.folderTargetHighlightOpacity))
+                        .allowsHitTesting(false)
+                }
             }
+            .gesture(reorderGesture)
+    }
+
+    private var reorderGesture: some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .named(LaunchpadView.gridSpace))
+            .onChanged { value in
+                if model.draggingItemID == nil {
+                    model.beginReorder(id: item.id, at: value.location)
+                }
+                model.updateReorder(cursor: value.location)
+            }
+            .onEnded { _ in model.endReorder() }
     }
 
     @ViewBuilder
@@ -225,37 +254,53 @@ private struct ItemCell: View {
             }
         }
     }
+}
 
-    @ViewBuilder
-    private var dragPreview: some View {
-        switch item {
-        case .app(let app):
-            DragPreview(path: app.id)
-        case .folder:
-            Image(systemName: "folder.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.white)
+/// The lifted icon that floats under the cursor during a reorder drag. Lives as a bare
+/// sibling in `LaunchpadView`'s root ZStack — OUTSIDE the pager's `.clipped()` and any
+/// `GlassEffectContainer` — so it can travel across pages without being clipped and
+/// never forces a glass resample. Reads `dragCursor` itself so the rest of the overlay
+/// doesn't re-evaluate on every pointer frame.
+struct DragFloater: View {
+    @Bindable var model: LaunchpadModel
+    var iconScale: CGFloat
+    @State private var icon: NSImage?
+
+    var body: some View {
+        Group {
+            switch model.draggingItem {
+            case .app:
+                if let icon {
+                    Image(nsImage: icon).resizable().interpolation(.high).scaledToFit()
+                } else {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.12))
+                }
+            case .folder:
+                Image(systemName: "folder.fill")
+                    .resizable().scaledToFit()
+                    .foregroundStyle(.white.opacity(0.95))
+            case .none:
+                EmptyView()
+            }
+        }
+        .frame(width: Metrics.iconSize * iconScale, height: Metrics.iconSize * iconScale)
+        .scaleEffect(Metrics.dragLiftScale)
+        .shadow(color: .black.opacity(0.45), radius: 16, y: 10)
+        .position(model.dragCursor)
+        .allowsHitTesting(false)
+        .task(id: iconPath) {
+            if let iconPath { icon = await IconLoader.shared.icon(forPath: iconPath) }
         }
     }
 
-    private var widthReader: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .onAppear { width = proxy.size.width }
-                .onChange(of: proxy.size.width) { _, w in width = w }
-        }
-    }
-
-    private func region(forX x: CGFloat) -> DropRegion {
-        let edge = max(20, width * 0.28)
-        if x < edge { return .before }
-        if x > width - edge { return .after }
-        return .onto
+    private var iconPath: String? {
+        if case .app(let app) = model.draggingItem { return app.id }
+        return nil
     }
 }
 
-/// Shown when a search matches nothing.
-private struct EmptyResultsView: View {
+/// Shown when a search matches nothing (shared with `SearchResultsView`).
+struct EmptyResultsView: View {
     let query: String
 
     var body: some View {
@@ -283,23 +328,5 @@ private struct NoAppsView: View {
                 .foregroundStyle(.white.opacity(0.85))
         }
         .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
-    }
-}
-
-/// Icon-sized drag image.
-private struct DragPreview: View {
-    let path: String
-    @State private var icon: NSImage?
-
-    var body: some View {
-        Group {
-            if let icon {
-                Image(nsImage: icon).resizable().interpolation(.high).scaledToFit()
-            } else {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.2))
-            }
-        }
-        .frame(width: 72, height: 72)
-        .task(id: path) { icon = await IconLoader.shared.icon(forPath: path) }
     }
 }
