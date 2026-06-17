@@ -155,9 +155,13 @@ private struct PageView: View {
                             .frame(maxWidth: .infinity)
                     }
                     // Keep a short last row left-aligned (cells stay column-width).
+                    // maxHeight: 0 is essential — a plain Color.clear is greedy in
+                    // BOTH axes, so an unconstrained filler would stretch the row to
+                    // fill all remaining vertical space and push its one real cell to
+                    // the vertical center (the "lone icon floating low" bug).
                     if rows[r].count < columnCount {
                         ForEach(0 ..< (columnCount - rows[r].count), id: \.self) { _ in
-                            Color.clear.frame(maxWidth: .infinity)
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
                         }
                     }
                 }
