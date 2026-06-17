@@ -35,12 +35,15 @@ enum Metrics {
         return max(4, min(9, n))
     }
 
-    /// Rows derived from available height (minus the search and page-dot chrome).
+    /// Rows that fit in the grid's available height. The caller (LaunchpadView)
+    /// already insets the grid by the search + page-dot chrome via padding, so the
+    /// passed `height` IS the usable grid area — do NOT subtract the chrome again
+    /// (that double-subtraction left ~2 rows of empty space and spilled apps onto an
+    /// extra page).
     static func rowCount(forHeight height: CGFloat, scale: CGFloat = 1) -> Int {
-        let usable = height - searchAreaHeight - pageDotsAreaHeight
         let perRow = (cellHeight + rowSpacing) * scale
-        let n = Int((usable / perRow).rounded(.down))
-        return max(2, min(7, n))
+        let n = Int((height / perRow).rounded(.down))
+        return max(2, min(8, n))
     }
 
     static var searchAreaHeight: CGFloat { searchTopPadding + searchPillHeight + searchBottomPadding }
