@@ -167,8 +167,6 @@ Load-bearing decisions:
 - **File search lives in its own array** — a file isn’t expressible as a grid item, so it
   can never leak into the saved layout.
 
-See [`plan.md`](plan.md) for the full vision and [`CONVENTIONS.md`](CONVENTIONS.md) for conventions.
-
 ### Project layout
 
 ```
@@ -201,9 +199,9 @@ in the search bar; multi-display spanning.
 
 ## Contributing
 
-Issues and PRs welcome. Conventions live in [`CONVENTIONS.md`](CONVENTIONS.md): macOS 26+ only, Swift 6
-strict concurrency, all constants in `Design/Metrics.swift`, glass on the functional layer
-only, UI/AppKit on `@MainActor`, conventional-commit messages, every commit builds.
+Issues and PRs welcome. Conventions: macOS 26+ only, Swift 6 strict concurrency, all
+constants in `Design/Metrics.swift`, glass on the functional layer only, UI/AppKit on
+`@MainActor`, conventional-commit messages, every commit builds.
 
 ## Credits & license
 

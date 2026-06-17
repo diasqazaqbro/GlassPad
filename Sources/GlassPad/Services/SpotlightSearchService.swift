@@ -11,7 +11,7 @@ import Foundation
 /// actor — only the `[FileResult]` snapshot crosses out.
 ///
 /// No SwiftUI import and no reference to the model: it produces data, the model owns
-/// it (CONVENTIONS.md's unidirectional rule).
+/// it (the project's unidirectional rule).
 @MainActor
 final class SpotlightSearchService {
     /// Delivered on the main actor whenever results change (or clear).
