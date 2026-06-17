@@ -8,6 +8,11 @@ struct PagedGrid: View {
     var onLaunch: (InstalledApp) -> Void
 
     @State private var scrolledPage: Int?
+    /// The page the swipe *began* on — captured the instant scrolling leaves idle,
+    /// before `scrollPosition`/`currentPage` advance mid-drag. The flick decision
+    /// is taken relative to this fixed anchor, so it always turns exactly one page
+    /// (no double-count, no jitter on rapid swipes).
+    @State private var dragStartPage = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -25,7 +30,7 @@ struct PagedGrid: View {
                 }
                 .scrollTargetLayout()
             }
-            .scrollTargetBehavior(.paging)
+            .scrollTargetBehavior(PageFlickBehavior(fromPage: dragStartPage, pageCount: model.pageCount))
             .scrollPosition(id: $scrolledPage)
             .scrollIndicators(.hidden)
             .scrollClipDisabled()
@@ -39,6 +44,15 @@ struct PagedGrid: View {
             .onAppear {
                 model.setGrid(columns: cols, rows: rows)
                 scrolledPage = model.currentPage
+                dragStartPage = model.currentPage
+            }
+            .onScrollPhaseChange { oldPhase, newPhase, context in
+                // Snapshot the page the gesture starts from, the moment scrolling
+                // leaves idle — so the flick is measured from a fixed anchor.
+                guard oldPhase == .idle, newPhase != .idle else { return }
+                let width = context.geometry.containerSize.width
+                guard width > 0 else { return }
+                dragStartPage = Int((context.geometry.contentOffset.x / width).rounded())
             }
             .onChange(of: cols) { model.setGrid(columns: cols, rows: rows) }
             .onChange(of: rows) { model.setGrid(columns: cols, rows: rows) }
@@ -51,6 +65,40 @@ struct PagedGrid: View {
                 }
             }
         }
+    }
+}
+
+/// Snap-to-page behaviour tuned for a *light* flick, measured from the page the
+/// swipe began on (`fromPage`). The system `.paging`/`.viewAligned` behaviours
+/// need a near-half-page drag; this turns exactly one page (Launchpad-style) on a
+/// small displacement or a gentle velocity, and never more than one — so a soft
+/// two-finger swipe is enough and rapid swipes stay stable.
+private struct PageFlickBehavior: ScrollTargetBehavior {
+    let fromPage: Int
+    let pageCount: Int
+
+    /// Fraction of a page the gesture must head toward to commit the turn.
+    private let displacement: CGFloat = 0.08
+    /// Points/second that count as a deliberate flick even with little drag.
+    private let velocityFlick: CGFloat = 60
+
+    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        let pageWidth = context.containerSize.width
+        guard pageWidth > 0 else { return }
+
+        let proposed = target.rect.minX / pageWidth
+        let movement = proposed - CGFloat(fromPage)
+        let velocity = context.velocity.dx
+
+        var destination = fromPage
+        if movement > displacement || velocity > velocityFlick {
+            destination = fromPage + 1
+        } else if movement < -displacement || velocity < -velocityFlick {
+            destination = fromPage - 1
+        }
+
+        destination = min(max(destination, 0), max(0, pageCount - 1))
+        target.rect.origin.x = CGFloat(destination) * pageWidth
     }
 }
 

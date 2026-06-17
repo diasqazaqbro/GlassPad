@@ -156,6 +156,14 @@ final class OverlayWindowController {
             }
         }
 
+        // Cmd+1…9 jumps straight to that page (clamped) — quick, precise paging.
+        if event.modifierFlags.contains(.command),
+           let chars = event.charactersIgnoringModifiers,
+           chars.count == 1, let digit = Int(chars), (1...9).contains(digit) {
+            model.goToPage(digit - 1)
+            return nil
+        }
+
         switch event.keyCode {
         case 53: // Esc
             hide()

@@ -19,6 +19,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watcher.start(paths: AppDiscoveryService.searchPaths.map(\.path)) { [weak self] in
             self?.model.loadApps()
         }
+
+        // 4-finger pinch: inward summons GlassPad, outward dismisses it. When on,
+        // the system's own pinch launcher is suppressed so they don't both appear.
+        // The monitor runs always (cheap); the setting gates whether it acts.
+        SystemGesture.setSystemPinchEnabled(!GestureSettings.summonWithPinch)
+        TrackpadPinchMonitor.shared.start(
+            onPinchIn: { [weak self] in
+                guard GestureSettings.summonWithPinch else { return }
+                self?.overlay.show()
+            },
+            onPinchOut: { [weak self] in
+                guard GestureSettings.summonWithPinch else { return }
+                self?.overlay.hide()
+            }
+        )
     }
 
     /// Dismiss the overlay when the app loses focus (the user clicked another app
@@ -31,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// can fire against a half-released watcher.
     func applicationWillTerminate(_ notification: Notification) {
         watcher.stop()
+        TrackpadPinchMonitor.shared.stop()
     }
 
     // MARK: - Menu-bar item
