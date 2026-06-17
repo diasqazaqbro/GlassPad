@@ -3,9 +3,23 @@ import SwiftUI
 /// Root overlay view: dimmed/blurred backdrop, a glass search pill, a horizontally
 /// paged item grid, glass page dots, and the morphing folder overlay.
 ///
-/// The whole tree lives in one `GlassEffectContainer` so the grid's folder tiles
-/// and the expanded folder panel share a namespace and can morph between each
-/// other. The folder's full-screen dim sits above the chrome but below the panel.
+/// ## Glass layering (the paging-smoothness fix)
+///
+/// The scrolling `PagedGrid` is deliberately **outside** any `GlassEffectContainer`
+/// and sits behind the chrome as a plain `ZStack` sibling. During a swipe the grid
+/// is therefore not a live glass member: nothing re-samples a backdrop as the icons
+/// translate, exactly like the real Launchpad. The functional chrome (search pill,
+/// page dots, gear) lives in its own `GlassEffectContainer` whose geometry is static
+/// during a swipe, so its glass pass is computed once, not per frame.
+///
+/// The folder open/close morph (`FolderCell` tile ↔ `FolderOverlay`) needs both
+/// `glassEffectID` endpoints inside *one* container. While a folder is open the
+/// grid is static, so it is free to co-reside in a container then: a single
+/// `GlassEffectContainer` wraps **both** the grid (whose open-folder tile is the
+/// morph source, rendered as real glass via `useLiveGlass`) and the `FolderOverlay`
+/// panel (the target). When no folder is open the grid is a bare sibling with no
+/// container — the swipe-smooth path. The folder's full-screen dim sits above the
+/// chrome but below the panel.
 struct LaunchpadView: View {
     @Bindable var model: LaunchpadModel
     var onDismiss: () -> Void
@@ -17,48 +31,70 @@ struct LaunchpadView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        GlassEffectContainer(spacing: Metrics.glassContainerSpacing) {
-            ZStack {
-                backdrop
+        ZStack {
+            backdrop
 
-                VStack(spacing: 0) {
-                    SearchPill(query: $model.query, isFocused: $searchFocused)
-                        .padding(.top, Metrics.searchTopPadding)
-                        .padding(.bottom, Metrics.searchBottomPadding)
+            // The scrolling grid. While no folder is open it is a bare sibling — NOT
+            // inside any GlassEffectContainer — so a swipe never recomputes glass
+            // behind the moving icons (the smooth path). While a folder IS open the
+            // grid is static, so it is wrapped (with the FolderOverlay panel) in one
+            // shared container below; in that state its open-folder tile is real glass
+            // (`useLiveGlass`) and co-contained with the panel for a clean morph.
+            if model.openFolder == nil {
+                grid
+            }
 
-                    PagedGrid(model: model, namespace: glassNamespace) { app in
-                        launchAndDismiss(app)
+            // Functional chrome: its own container, static during a swipe → one
+            // glass pass, not per-frame.
+            GlassEffectContainer(spacing: Metrics.glassContainerSpacing) {
+                ZStack {
+                    VStack(spacing: 0) {
+                        SearchPill(query: $model.query, isFocused: $searchFocused)
+                            .padding(.top, Metrics.searchTopPadding)
+                            .padding(.bottom, Metrics.searchBottomPadding)
+
+                        Spacer(minLength: 0)
+
+                        PageDots(count: model.pageCount, current: model.currentPage) { page in
+                            model.goToPage(page)
+                        }
+                        .frame(height: Metrics.pageDotsAreaHeight)
                     }
 
-                    PageDots(count: model.pageCount, current: model.currentPage) { page in
-                        model.goToPage(page)
+                    if model.openFolder == nil {
+                        settingsButton
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                            .padding(24)
                     }
-                    .frame(height: Metrics.pageDotsAreaHeight)
                 }
+            }
 
-                if model.openFolder == nil {
-                    settingsButton
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                        .padding(24)
-                }
+            if let folder = model.openFolder {
+                // Folder-open layer: ONE container holding both the (static) grid and
+                // the FolderOverlay panel, so the tile↔panel morph has both
+                // glassEffectID endpoints co-contained. Present only while open, so
+                // this container is never live during a swipe.
+                GlassEffectContainer(spacing: Metrics.glassContainerSpacing) {
+                    ZStack {
+                        grid
 
-                if let folder = model.openFolder {
-                    // Full-screen dim + click-anywhere-to-close, above the chrome.
-                    Rectangle()
-                        .fill(.black.opacity(Metrics.folderOverlayDim))
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture { closeFolder() }
+                        // Full-screen dim + click-anywhere-to-close, above the grid.
+                        Rectangle()
+                            .fill(.black.opacity(Metrics.folderOverlayDim))
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture { closeFolder() }
 
-                    // The morph target panel, centered over the whole window.
-                    FolderOverlay(
-                        folder: folder,
-                        apps: model.resolvedApps(in: folder),
-                        launchingItemID: model.launchingItemID,
-                        namespace: glassNamespace,
-                        onLaunch: { app in launchAndDismiss(app) },
-                        onRename: { name in model.renameFolder(folder, to: name) }
-                    )
+                        // The morph target panel, centered over the whole window.
+                        FolderOverlay(
+                            folder: folder,
+                            apps: model.resolvedApps(in: folder),
+                            launchingItemID: model.launchingItemID,
+                            namespace: glassNamespace,
+                            onLaunch: { app in launchAndDismiss(app) },
+                            onRename: { name in model.renameFolder(folder, to: name) }
+                        )
+                    }
                 }
             }
         }
@@ -71,6 +107,19 @@ struct LaunchpadView: View {
         .onChange(of: model.query) {
             model.handleQueryChange()
         }
+    }
+
+    /// The paged grid. Rendered either as a bare sibling (no folder open → swipe-
+    /// smooth, no glass container) or inside the folder-open container (folder open →
+    /// static, co-contained with the panel for the morph). `useLiveGlass` mirrors
+    /// the open state so the open-folder tile is real glass exactly when the morph
+    /// needs it.
+    private var grid: some View {
+        PagedGrid(model: model, namespace: glassNamespace, useLiveGlass: model.openFolder != nil) { app in
+            launchAndDismiss(app)
+        }
+        .padding(.top, Metrics.searchAreaHeight)
+        .padding(.bottom, Metrics.pageDotsAreaHeight)
     }
 
     private func closeFolder() {

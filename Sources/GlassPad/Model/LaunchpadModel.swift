@@ -59,15 +59,24 @@ final class LaunchpadModel {
 
     // MARK: - Derived data
 
-    var pages: [[LaunchpadItem]] {
-        guard !displayedItems.isEmpty else { return [[]] }
+    /// Stored page slices — rebuilt only when `displayedItems` or the grid
+    /// geometry (`pageCapacity`) change, never on a scroll-driven re-render. (Was
+    /// a computed property that re-`stride`d + allocated ~100 items into fresh
+    /// page arrays on *every* access, i.e. on every `PagedGrid.body` evaluation —
+    /// a per-frame cost during a swipe. Now it is O(1) to read.)
+    private(set) var pages: [[LaunchpadItem]] = [[]]
+
+    var pageCount: Int { pages.count }
+
+    /// Recompute the cached page slices. Call after any change to
+    /// `displayedItems` or to the grid geometry. Cheap and idempotent.
+    private func rebuildPages() {
+        guard !displayedItems.isEmpty else { pages = [[]]; return }
         let cap = pageCapacity
-        return stride(from: 0, to: displayedItems.count, by: cap).map {
+        pages = stride(from: 0, to: displayedItems.count, by: cap).map {
             Array(displayedItems[$0 ..< min($0 + cap, displayedItems.count)])
         }
     }
-
-    var pageCount: Int { pages.count }
 
     /// Position of the keyboard selection in the current display list.
     private var selectedIndex: Int? {
@@ -99,6 +108,7 @@ final class LaunchpadModel {
 
     private func rebuildDisplayedItems() {
         displayedItems = searching ? computeFilteredApps().map(LaunchpadItem.app) : items
+        rebuildPages() // keep the cached slices in step with the display list
     }
 
     // MARK: - Loading & reconciliation
@@ -185,6 +195,7 @@ final class LaunchpadModel {
         guard c != self.columns || r != self.rows else { return }
         self.columns = c
         self.rows = r
+        rebuildPages() // pageCapacity changed → re-slice before clamp reads pageCount
         clampPage()
     }
 

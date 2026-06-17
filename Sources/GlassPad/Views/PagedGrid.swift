@@ -2,13 +2,13 @@ import SwiftUI
 
 /// Horizontally paged grid of launcher items (apps + folders).
 ///
-/// ## Why this pager is stable (the design that won the review)
+/// ## Why this pager is stable AND smooth
 ///
 /// Paging is driven entirely by SwiftUI's built-in **view-aligned** scrolling —
 /// no custom `ScrollTargetBehavior`, no hand-rolled container `DragGesture`, no
 /// manual `.offset`. There is exactly **one** source of truth for the visible
-/// page (`scrolledPage`, the `.scrollPosition` id), and `model.currentPage` is
-/// kept in step through a single, guarded, non-oscillating bridge.
+/// page (`scrolledPage`, the `.scrollPosition` id); `model.currentPage` mirrors
+/// it through a single guarded, non-oscillating bridge.
 ///
 ///  1. **STABLE.** `.scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))`
 ///     always snaps the resting offset to a page boundary (each page is
@@ -17,36 +17,52 @@ import SwiftUI
 ///     state. `.alwaysByOne` is a hard one-page-per-gesture cap computed
 ///     synchronously by the framework from the live offset + velocity, so a swipe
 ///     can never skip a page no matter how fast, and rapid consecutive swipes each
-///     resolve to one definite boundary. (The old `PageFlickBehavior` jumped two
-///     pages because it added `fromPage ± 1` to a `fromPage` that was sampled
-///     asynchronously and lagged a fast gesture by a page.)
+///     resolve to one definite boundary. (The rejected `PageFlickBehavior` jumped
+///     two pages because it added `fromPage ± 1` to a `fromPage` sampled
+///     asynchronously, which lagged a fast gesture by a page.)
 ///
 ///  2. **COMFORTABLE.** Plain `.paging` requires dragging past the half-way point,
-///     which the user found too stiff. `.viewAligned` turns on momentum/velocity:
-///     a light two-finger flick (which carries velocity, not displacement) turns
-///     the page — no near-half-page drag — while `.alwaysByOne` still caps it at
-///     exactly one page.
+///     which the user found too stiff. `.viewAligned` is velocity-driven: a light
+///     two-finger flick (which carries velocity, not displacement) turns the page —
+///     no near-half-page drag — while `.alwaysByOne` still caps it at one page.
 ///
-///  3. **COEXISTS WITH DRAG-TO-REORDER.** There is deliberately **no** custom
+///  3. **SMOOTH (the fix).** The snap mechanic was never the lag — the *render cost
+///     per scroll frame* was. Three per-frame costs are now gone:
+///       • **No live Liquid Glass behind the moving icons.** This grid renders
+///         *outside* any `GlassEffectContainer` (see `LaunchpadView`), and its
+///         folder tiles use a cheap static material while scrolling (real glass
+///         only while a folder is open, when the grid is static — `useLiveGlass`).
+///         So a swipe recomputes zero glass backdrop, exactly like real Launchpad.
+///       • **No per-frame page re-slice.** The page list is read from a *stored*
+///         `model.pages` (O(1)); it used to be a computed property that re-`stride`d
+///         + allocated ~100 items on every body evaluation.
+///       • **No mid-fling thrash.** The `scrolledPage → currentPage` bridge only
+///         ever writes a *different* integer (and ignores a transient `nil`), so it
+///         cannot re-invalidate the body with the same value during the fling.
+///
+///  4. **COEXISTS WITH DRAG-TO-REORDER.** There is deliberately **no** custom
 ///     `DragGesture` on the container — the single most important decision here.
 ///     The pager rides only `ScrollView`'s native, content-drag-aware scroll
 ///     recognizer, so a press that begins on a `.draggable` cell starts a drag
 ///     session (lifting the icon) while a free horizontal pan scrolls the page.
 ///     Nothing on the container can swallow a cell's `.draggable` press-drag, and
-///     nothing for the cell drag to fight. (A simultaneous container `DragGesture`
-///     layered over per-cell `.draggable` — the rejected alternative — routinely
-///     has both recognizers contend for the same press-drag; this design removes
-///     that entire class of conflict.)
+///     nothing for the cell drag to fight. (A simultaneous / high-priority container
+///     `DragGesture` layered over per-cell `.draggable` — the rejected anti-pattern —
+///     routinely has both recognizers contend for the same press; this design
+///     removes that entire class of conflict.)
 ///
-///  4. **SYNCS with `model.currentPage`.** Swipe-driven changes flow one way
+///  5. **SYNCS with `model.currentPage`.** Swipe-driven changes flow one way
 ///     (`scrolledPage → currentPage`, no animation). Programmatic changes — page
 ///     dots, keyboard arrows via `model.move`, `Cmd+1…9` via `model.goToPage` —
 ///     flow the other way (`currentPage → scrolledPage`, animated), guarded by
 ///     `syncingFromModel` so the echo can never bounce back and restart the scroll
-///     animation mid-fling (the old dual-`onChange` feedback loop, now broken).
+///     animation mid-fling.
 struct PagedGrid: View {
     @Bindable var model: LaunchpadModel
     var namespace: Namespace.ID
+    /// Forwarded to `FolderCell`: render folder tiles as real glass (for the morph)
+    /// only while a folder is open — i.e. when the grid is static, never mid-swipe.
+    var useLiveGlass: Bool = false
     var onLaunch: (InstalledApp) -> Void
 
     /// THE single source of truth for the visible page. Bound to `.scrollPosition`,
@@ -67,10 +83,20 @@ struct PagedGrid: View {
 
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
-                    ForEach(Array(model.pages.enumerated()), id: \.offset) { index, items in
-                        PageView(items: items, model: model, namespace: namespace, iconScale: scale, onLaunch: onLaunch)
-                            .frame(width: geo.size.width)
-                            .id(index)
+                    // Read the *stored* page slices (model.pages is no longer a
+                    // recomputed property) and iterate by index, so a scroll-driven
+                    // re-render does no per-frame array work.
+                    ForEach(model.pages.indices, id: \.self) { index in
+                        PageView(
+                            items: model.pages[index],
+                            model: model,
+                            namespace: namespace,
+                            iconScale: scale,
+                            useLiveGlass: useLiveGlass,
+                            onLaunch: onLaunch
+                        )
+                        .frame(width: geo.size.width)
+                        .id(index)
                     }
                 }
                 .scrollTargetLayout()
@@ -123,12 +149,14 @@ private struct PageView: View {
     @Bindable var model: LaunchpadModel
     var namespace: Namespace.ID
     var iconScale: CGFloat
+    var useLiveGlass: Bool
     var onLaunch: (InstalledApp) -> Void
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: Metrics.rowSpacing) {
             ForEach(items) { item in
-                ItemCell(item: item, model: model, namespace: namespace, iconScale: iconScale, onLaunch: onLaunch)
+                ItemCell(item: item, model: model, namespace: namespace,
+                         iconScale: iconScale, useLiveGlass: useLiveGlass, onLaunch: onLaunch)
             }
         }
         .padding(.horizontal, Metrics.gridHorizontalMargin)
@@ -158,6 +186,7 @@ private struct ItemCell: View {
     @Bindable var model: LaunchpadModel
     var namespace: Namespace.ID
     var iconScale: CGFloat
+    var useLiveGlass: Bool
     var onLaunch: (InstalledApp) -> Void
 
     @State private var width: CGFloat = Metrics.cellWidth
@@ -190,7 +219,8 @@ private struct ItemCell: View {
                 isSelected: model.selectedItemID == item.id,
                 isOpen: model.openFolder?.id == folder.id,
                 iconScale: iconScale,
-                namespace: namespace
+                namespace: namespace,
+                useLiveGlass: useLiveGlass
             ) {
                 withAnimation(reduceMotion ? nil : Metrics.morph) { model.openFolder = folder }
             }

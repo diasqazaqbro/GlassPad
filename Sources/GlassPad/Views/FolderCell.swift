@@ -1,8 +1,24 @@
 import SwiftUI
 
-/// A folder tile: a glass square holding a mini grid of its app icons, with the
-/// folder name below. The glass square carries a `glassEffectID` so it can morph
-/// into the expanded `FolderOverlay` panel.
+/// A folder tile: a frosted square holding a mini grid of its app icons, with the
+/// folder name below.
+///
+/// ## Why the tile's glass is conditional (the paging-smoothness fix)
+///
+/// At rest in the scrolling grid the tile is a cheap **static** `.ultraThinMaterial`
+/// fill — it is *not* a live `.glassEffect`, so when the grid translates during a
+/// swipe there is no per-frame backdrop sample/refraction to recompute. This is
+/// the per-tile cost that used to jank the swipe (the grid carried live glass
+/// behind the moving icons; real Launchpad has none).
+///
+/// `useLiveGlass` is flipped on by `LaunchpadView` only while a folder is open
+/// (`model.openFolder != nil`) — i.e. when the grid is static, never mid-swipe.
+/// In that state the tile becomes a *real* `.glassEffect` carrying the morph
+/// `glassEffectID`, so the open/close "liquid" morph into `FolderOverlay` still
+/// reads from a genuine glass shape (a `.ultraThinMaterial` fill could not be a
+/// morph source). Both endpoints live in the same small `GlassEffectContainer`
+/// that `LaunchpadView` wraps around the folder-open layer, satisfying the
+/// matched-geometry morph's same-container requirement.
 struct FolderCell: View {
     let folder: Folder
     let apps: [InstalledApp]
@@ -10,6 +26,8 @@ struct FolderCell: View {
     var isOpen: Bool
     var iconScale: CGFloat = 1
     var namespace: Namespace.ID
+    /// True only while *some* folder is open (the grid is static) — see type doc.
+    var useLiveGlass: Bool = false
     var onOpen: () -> Void
 
     @State private var hovering = false
@@ -55,12 +73,22 @@ struct FolderCell: View {
             // While expanded, the overlay panel owns the morph id — this tile must
             // not duplicate the glassEffectID, so render an empty placeholder.
             Color.clear.frame(width: Metrics.iconSize * iconScale, height: Metrics.iconSize * iconScale)
-        } else {
+        } else if useLiveGlass {
+            // A folder is open (grid is static): be a real glass shape carrying the
+            // morph id, so the open/close morph reads from genuine glass and both
+            // endpoints share LaunchpadView's folder-layer GlassEffectContainer.
             miniGrid
                 .padding(Metrics.folderTilePadding)
                 .frame(width: Metrics.iconSize * iconScale, height: Metrics.iconSize * iconScale)
                 .glassEffect(.regular, in: .rect(cornerRadius: Metrics.folderTileCornerRadius))
                 .glassEffectID(LaunchpadItem.folderItemID(folder.id), in: namespace)
+        } else {
+            // Resting / scrolling: cheap static frosted fill — no live glass, so a
+            // swipe recomputes nothing here. Visually near-identical at rest.
+            miniGrid
+                .padding(Metrics.folderTilePadding)
+                .frame(width: Metrics.iconSize * iconScale, height: Metrics.iconSize * iconScale)
+                .background(.ultraThinMaterial, in: .rect(cornerRadius: Metrics.folderTileCornerRadius))
         }
     }
 
