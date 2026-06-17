@@ -9,6 +9,7 @@ import SwiftUI
 struct LaunchpadView: View {
     @Bindable var model: LaunchpadModel
     var onDismiss: () -> Void
+    var onOpenSettings: () -> Void
 
     @FocusState private var searchFocused: Bool
     @State private var appeared = false
@@ -33,6 +34,12 @@ struct LaunchpadView: View {
                         model.goToPage(page)
                     }
                     .frame(height: Metrics.pageDotsAreaHeight)
+                }
+
+                if model.openFolder == nil {
+                    settingsButton
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(24)
                 }
 
                 if let folder = model.openFolder {
@@ -75,6 +82,20 @@ struct LaunchpadView: View {
     private func launchAndDismiss(_ app: InstalledApp) {
         model.launch(app)
         onDismiss()
+    }
+
+    /// A glass gear button in the corner — the visible way into Settings (so it
+    /// doesn't depend on the menu-bar icon, which the overlay covers, or on ⌘,).
+    private var settingsButton: some View {
+        Button(action: onOpenSettings) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(width: 42, height: 42)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L("menu.settings"))
     }
 
     /// The blurred desktop the glass refracts. The material samples the window

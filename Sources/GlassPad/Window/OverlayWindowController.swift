@@ -72,6 +72,12 @@ final class OverlayWindowController {
         }
     }
 
+    /// Close the overlay and open the Settings window (gear button / ⌘,).
+    private func openSettingsAndHide() {
+        hide()
+        onOpenSettings?()
+    }
+
     /// Dismiss after a short beat so a launch pop is visible, but only if this
     /// summon is still the current one (no re-open happened in the meantime).
     private func scheduleLaunchHide() {
@@ -127,7 +133,11 @@ final class OverlayWindowController {
         window.isReleasedWhenClosed = false
         window.setFrame(screen.frame, display: true)
 
-        let root = LaunchpadView(model: model, onDismiss: { [weak self] in self?.scheduleLaunchHide() })
+        let root = LaunchpadView(
+            model: model,
+            onDismiss: { [weak self] in self?.scheduleLaunchHide() },
+            onOpenSettings: { [weak self] in self?.openSettingsAndHide() }
+        )
         let host = NSHostingView(rootView: root)
         host.frame = window.contentLayoutRect
         window.contentView = host
@@ -160,8 +170,7 @@ final class OverlayWindowController {
         // ⌘, opens Settings from anywhere in the overlay — a robust path that
         // doesn't depend on finding the menu-bar icon.
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "," {
-            hide()
-            onOpenSettings?()
+            openSettingsAndHide()
             return nil
         }
 
