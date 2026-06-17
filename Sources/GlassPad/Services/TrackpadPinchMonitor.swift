@@ -25,8 +25,16 @@ final class TrackpadPinchMonitor: @unchecked Sendable {
     // spread by `pinchDelta` from its extreme, having been at least `minActive`
     // wide/narrow — enough to ignore resting fingers and 4-finger swipes (which
     // translate but barely change spread).
-    private let pinchDelta: Float = 0.045
+    // Written on the main actor (setSensitivity), read on the multitouch thread —
+    // a plain aligned Float under this class's existing @unchecked Sendable contract.
+    private var pinchDelta: Float = 0.045
     private let minActiveSpread: Float = 0.05
+
+    /// Map a friendly 0…1 (Light…Firm) sensitivity to the pinch threshold.
+    /// 0.5 reproduces the original hardcoded 0.045.
+    func setSensitivity(_ value: Double) {
+        pinchDelta = 0.025 + Float(min(1, max(0, value))) * 0.045
+    }
 
     @discardableResult
     func start(onPinchIn: @escaping @MainActor () -> Void,

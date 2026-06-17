@@ -15,17 +15,20 @@ final class SettingsWindowController {
     func show() {
         if window == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
+                contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
             )
-            window.title = "GlassPad Settings"
+            window.title = L("window.settingsTitle")
             window.isReleasedWhenClosed = false
             window.center()
             let host = NSHostingView(rootView: SettingsView(model: model))
             window.contentView = host
-            window.setContentSize(host.fittingSize)
+            // Fixed size: a TabView's fittingSize collapses to the smallest tab,
+            // so we size the window ourselves.
+            window.setContentSize(NSSize(width: 520, height: 460))
+            window.contentMinSize = NSSize(width: 520, height: 360)
             self.window = window
         }
         NSApp.activate(ignoringOtherApps: true)

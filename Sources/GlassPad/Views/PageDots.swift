@@ -21,8 +21,8 @@ struct PageDots: View {
                         .contentShape(.rect)
                         .onHover { hovered = $0 ? index : (hovered == index ? nil : hovered) }
                         .onTapGesture { onSelect(index) }
-                        .accessibilityLabel("Page \(index + 1)")
-                        .accessibilityHint("Jumps to page \(index + 1)")
+                        .accessibilityLabel(L("page.label", index + 1))
+                        .accessibilityHint(L("page.hint", index + 1))
                         .accessibilityAddTraits(index == current ? [.isButton, .isSelected] : .isButton)
                 }
             }

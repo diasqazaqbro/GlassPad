@@ -21,7 +21,7 @@ struct FolderOverlay: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            TextField("Folder", text: $name)
+            TextField(L("folder.placeholder"), text: $name)
                 .textFieldStyle(.plain)
                 .multilineTextAlignment(.center)
                 .font(.system(size: 20, weight: .semibold))
@@ -36,7 +36,7 @@ struct FolderOverlay: View {
                 )
                 .focused($nameFocused)
                 .onSubmit { commitName() }
-                .accessibilityLabel("Folder name")
+                .accessibilityLabel(L("folder.nameLabel"))
 
             LazyVGrid(columns: columns, spacing: 20) {
                 ForEach(apps) { app in

@@ -14,13 +14,13 @@ struct SearchPill: View {
                 .font(.system(size: Metrics.searchFontSize, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
 
-            TextField("Search", text: $query)
+            TextField(L("search.placeholder"), text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: Metrics.searchFontSize))
                 .foregroundStyle(.white)
                 .tint(.white)
                 .focused($isFocused)
-                .accessibilityLabel("Search apps")
+                .accessibilityLabel(L("search.fieldLabel"))
 
             if !query.isEmpty {
                 Button {
@@ -31,7 +31,7 @@ struct SearchPill: View {
                         .foregroundStyle(.white.opacity(0.6))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
+                .accessibilityLabel(L("search.clearLabel"))
                 .transition(.opacity)
             }
         }

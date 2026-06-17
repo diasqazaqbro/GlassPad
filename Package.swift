@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "GlassPad",
+    defaultLocalization: "en",
     platforms: [.macOS("26.0")],
     products: [
         .executable(name: "GlassPad", targets: ["GlassPad"])
@@ -24,6 +25,9 @@ let package = Package(
                 "CMultitouch"
             ],
             path: "Sources/GlassPad",
+            resources: [
+                .process("Resources")
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ],

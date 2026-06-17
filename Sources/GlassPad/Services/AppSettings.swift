@@ -34,6 +34,13 @@ enum AppSettings {
         static let gridDensity = "gridDensity"
         static let backdropDim = "backdropDim"
         static let useWallpaper = "useWallpaper"
+        static let languagePreference = "languagePreference"
+    }
+
+    /// Selected UI language code ("en"/"ru"), or nil to follow the system.
+    static var languagePreference: String? {
+        get { defaults.string(forKey: Key.languagePreference) }
+        set { defaults.set(newValue, forKey: Key.languagePreference) }
     }
 
     static var showMenuBarIcon: Bool {

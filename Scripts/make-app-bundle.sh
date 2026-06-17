@@ -25,6 +25,16 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/${APP_NAME}"
 
+# Copy the SwiftPM resource bundle (localizations) so Bundle.module resolves in
+# the packaged app — without this, RU/EN strings fall back to the keys.
+RES_BUNDLE="$(swift build -c release --show-bin-path)/${APP_NAME}_${APP_NAME}.bundle"
+if [ -d "$RES_BUNDLE" ]; then
+  cp -R "$RES_BUNDLE" "$APP/Contents/Resources/"
+  echo "▸ Bundled resources: $(basename "$RES_BUNDLE")"
+else
+  echo "⚠︎ resource bundle not found at $RES_BUNDLE (localizations may be missing)"
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

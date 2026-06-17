@@ -2,96 +2,219 @@ import SwiftUI
 import AppKit
 import KeyboardShortcuts
 
-/// Settings surface: a single grouped Form (4 sections) in a standard titled
-/// window. Modeless, no Save/Apply — every control commits on `.onChange`.
+/// Apple-style settings: a System-Settings-style toolbar-tab window (non-glass,
+/// standard chrome). Each tab is a grouped Form. Modeless — every control commits
+/// on `.onChange`. All labels go through `L(...)`, so flipping the language in the
+/// Language tab re-renders every tab live (no relaunch).
 struct SettingsView: View {
     let model: LaunchpadModel
+    @State private var localization = LocalizationManager.shared
 
+    var body: some View {
+        TabView {
+            GeneralTab(model: model)
+                .tabItem { Label(L("tab.general"), systemImage: "gearshape") }
+            AppearanceTab()
+                .tabItem { Label(L("tab.appearance"), systemImage: "paintbrush") }
+            ShortcutsTab()
+                .tabItem { Label(L("tab.shortcuts"), systemImage: "keyboard") }
+            GesturesTab()
+                .tabItem { Label(L("tab.gestures"), systemImage: "hand.draw") }
+            LanguageTab()
+                .tabItem { Label(L("tab.language"), systemImage: "globe") }
+        }
+        .frame(width: 520, height: 460)
+    }
+}
+
+// MARK: - General
+
+private struct GeneralTab: View {
+    let model: LaunchpadModel
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var showMenuBarIcon = AppSettings.showMenuBarIcon
-    @State private var density = AppSettings.gridDensity
-    @State private var backdropDim = AppSettings.backdropDim
-    @State private var useWallpaper = AppSettings.useWallpaper
-    @State private var summonWithPinch = GestureSettings.summonWithPinch
     @State private var confirmingReset = false
 
     var body: some View {
         Form {
-            Section("General") {
-                Toggle("Launch GlassPad at login", isOn: $launchAtLogin)
+            Section {
+                Toggle(L("settings.launchAtLogin"), isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         LoginItem.setEnabled(enabled)
-                        launchAtLogin = LoginItem.isEnabled // reflect the real state
+                        launchAtLogin = LoginItem.isEnabled
                     }
-
-                Toggle("Show icon in menu bar", isOn: $showMenuBarIcon)
+                Toggle(L("settings.showMenuBarIcon"), isOn: $showMenuBarIcon)
                     .onChange(of: showMenuBarIcon) { _, enabled in
                         AppSettings.showMenuBarIcon = enabled
                         (NSApp.delegate as? AppDelegate)?.applyMenuBarIconSetting()
                     }
-                footnote("Off → summon only by shortcut or pinch. Relaunch GlassPad to reach Settings again.")
-
-                Button("Reset Layout to Defaults…", role: .destructive) { confirmingReset = true }
+                footnote(L("settings.menuBarIconHint"))
+            }
+            Section {
+                Button(L("settings.resetLayout"), role: .destructive) { confirmingReset = true }
                     .confirmationDialog(
-                        "Reset Layout to Defaults?",
+                        L("settings.resetLayoutTitle"),
                         isPresented: $confirmingReset,
                         titleVisibility: .visible
                     ) {
-                        Button("Reset", role: .destructive) { model.resetLayout() }
-                        Button("Cancel", role: .cancel) {}
+                        Button(L("common.reset"), role: .destructive) { model.resetLayout() }
+                        Button(L("common.cancel"), role: .cancel) {}
                     } message: {
-                        Text("Removes all folders and custom ordering. Apps stay installed; the grid returns to alphabetical order.")
+                        Text(L("settings.resetLayoutMessage"))
                     }
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
-            Section("Appearance") {
-                Picker("Grid density", selection: $density) {
-                    ForEach(AppSettings.GridDensity.allCases) { Text($0.label).tag($0) }
+// MARK: - Appearance
+
+private struct AppearanceTab: View {
+    @State private var density = AppSettings.gridDensity
+    @State private var backdropDim = AppSettings.backdropDim
+    @State private var useWallpaper = AppSettings.useWallpaper
+
+    var body: some View {
+        Form {
+            Section {
+                Picker(L("settings.gridDensity.label"), selection: $density) {
+                    Text(L("settings.gridDensity.comfortable")).tag(AppSettings.GridDensity.comfortable)
+                    Text(L("settings.gridDensity.standard")).tag(AppSettings.GridDensity.standard)
+                    Text(L("settings.gridDensity.compact")).tag(AppSettings.GridDensity.compact)
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: density) { _, value in AppSettings.gridDensity = value }
 
                 Slider(value: $backdropDim, in: 0 ... 0.4) {
-                    Text("Backdrop dimming")
+                    Text(L("settings.backdropDim.label"))
                 } minimumValueLabel: {
                     Image(systemName: "sun.max")
                 } maximumValueLabel: {
                     Image(systemName: "moon")
                 }
                 .onChange(of: backdropDim) { _, value in AppSettings.backdropDim = value }
-
-                Toggle("Use desktop wallpaper as background", isOn: $useWallpaper)
+            }
+            Section {
+                Toggle(L("settings.useWallpaper.label"), isOn: $useWallpaper)
                     .onChange(of: useWallpaper) { _, enabled in
                         AppSettings.useWallpaper = enabled
-                        // Trigger the Screen-Recording prompt; capture falls back to
-                        // the material backdrop until permission is actually granted.
                         if enabled { WallpaperCaptureService.requestPermission() }
                     }
-                footnote("Captures the screen behind GlassPad (asks for Screen-Recording permission — may need a relaunch). Off → frosted glass.")
+                footnote(L("settings.useWallpaper.hint"))
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
-            Section("Shortcuts") {
-                KeyboardShortcuts.Recorder("Summon GlassPad:", name: .toggleGlassPad)
-                footnote("Jump to a page with ⌘1–⌘9. In the grid: arrows move, Return opens, Esc closes, type to search.")
+// MARK: - Shortcuts
+
+private struct ShortcutsTab: View {
+    var body: some View {
+        Form {
+            Section {
+                KeyboardShortcuts.Recorder(L("settings.shortcuts.summon"), name: .toggleGlassPad)
             }
+            Section(L("settings.shortcuts.inside")) {
+                KeyCapRow(keys: "⌘1 – ⌘9", label: L("shortcut.jumpPage"))
+                KeyCapRow(keys: "↑ ↓ ← →", label: L("shortcut.move"))
+                KeyCapRow(keys: "↩", label: L("shortcut.open"))
+                KeyCapRow(keys: "⎋", label: L("shortcut.close"))
+                KeyCapRow(keys: "⌘,", label: L("shortcut.settings"))
+                KeyCapRow(keys: "A–Z", label: L("shortcut.search"))
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
 
-            Section("Gestures") {
-                Toggle("Open with four-finger pinch", isOn: $summonWithPinch)
+/// Read-only shortcut legend row: a label with a key-cap glyph on the trailing edge.
+private struct KeyCapRow: View {
+    let keys: String
+    let label: String
+
+    var body: some View {
+        LabeledContent(label) {
+            Text(keys)
+                .font(.system(.callout, design: .rounded).weight(.medium))
+                .monospacedDigit()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(.quaternary, in: .rect(cornerRadius: 6))
+        }
+    }
+}
+
+// MARK: - Gestures
+
+private struct GesturesTab: View {
+    @State private var summonWithPinch = GestureSettings.summonWithPinch
+    @State private var sensitivity = GestureSettings.pinchSensitivity
+    @State private var invert = GestureSettings.invertPinchDirection
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(L("settings.gestures.pinch"), isOn: $summonWithPinch)
                     .onChange(of: summonWithPinch) { _, enabled in
                         GestureSettings.summonWithPinch = enabled
                         SystemGesture.setSystemPinchEnabled(!enabled)
                     }
-                footnote("Pinch inward with four fingers to open, spread to close. Turning this on disables the macOS pinch launcher; a full switch-over may need a logout.")
+                footnote(L("settings.gestures.pinch.hint"))
+            }
+            Section {
+                Slider(value: $sensitivity, in: 0 ... 1) {
+                    Text(L("settings.gestures.sensitivity"))
+                } minimumValueLabel: {
+                    Text(L("settings.gestures.sensitivity.light"))
+                } maximumValueLabel: {
+                    Text(L("settings.gestures.sensitivity.firm"))
+                }
+                .disabled(!summonWithPinch)
+                .onChange(of: sensitivity) { _, value in
+                    GestureSettings.pinchSensitivity = value
+                    (NSApp.delegate as? AppDelegate)?.applyPinchSensitivity()
+                }
+                footnote(L("settings.gestures.sensitivity.hint"))
+
+                Toggle(L("settings.gestures.invert"), isOn: $invert)
+                    .disabled(!summonWithPinch)
+                    .onChange(of: invert) { _, value in GestureSettings.invertPinchDirection = value }
+                footnote(L("settings.gestures.invert.hint"))
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
     }
+}
 
-    private func footnote(_ text: String) -> some View {
-        Text(text)
-            .font(.footnote)
-            .foregroundStyle(.secondary)
+// MARK: - Language
+
+private struct LanguageTab: View {
+    @State private var localization = LocalizationManager.shared
+
+    var body: some View {
+        Form {
+            Section {
+                Picker(L("settings.language.label"), selection: Binding(
+                    get: { localization.currentLanguage },
+                    set: { localization.setLanguage($0) }
+                )) {
+                    ForEach(LocalizationManager.Language.allCases) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+        .formStyle(.grouped)
     }
+}
+
+// MARK: - Shared
+
+private func footnote(_ text: String) -> some View {
+    Text(text)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
 }

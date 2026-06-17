@@ -50,7 +50,7 @@ struct AppCell: View {
         .onHover { hovering = $0 }
         .animation(reduceMotion ? nil : Metrics.pop, value: scale)
         .accessibilityLabel(app.name)
-        .accessibilityHint("Launches \(app.name)")
+        .accessibilityHint(L("app.launches", app.name))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .task(id: app.id) {
             icon = await IconLoader.shared.icon(forPath: app.id)

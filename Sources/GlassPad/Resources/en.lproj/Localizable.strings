@@ -1,0 +1,74 @@
+/* Tabs */
+"tab.general" = "General";
+"tab.appearance" = "Appearance";
+"tab.shortcuts" = "Shortcuts";
+"tab.gestures" = "Gestures";
+"tab.language" = "Language";
+
+/* General */
+"settings.launchAtLogin" = "Launch GlassPad at login";
+"settings.showMenuBarIcon" = "Show icon in menu bar";
+"settings.menuBarIconHint" = "Off → summon only by shortcut or pinch. Relaunch GlassPad to reach Settings again.";
+"settings.resetLayout" = "Reset Layout to Defaults…";
+"settings.resetLayoutTitle" = "Reset Layout to Defaults?";
+"settings.resetLayoutMessage" = "Removes all folders and custom ordering. Apps stay installed; the grid returns to alphabetical order.";
+
+/* Appearance */
+"settings.gridDensity.label" = "Grid density";
+"settings.gridDensity.comfortable" = "Comfortable";
+"settings.gridDensity.standard" = "Standard";
+"settings.gridDensity.compact" = "Compact";
+"settings.backdropDim.label" = "Backdrop dimming";
+"settings.useWallpaper.label" = "Use desktop wallpaper as background";
+"settings.useWallpaper.hint" = "Captures the screen behind GlassPad (asks for Screen-Recording permission — may need a relaunch). Off → frosted glass.";
+
+/* Shortcuts */
+"settings.shortcuts.summon" = "Summon GlassPad:";
+"settings.shortcuts.inside" = "Inside GlassPad:";
+"shortcut.jumpPage" = "Jump to page";
+"shortcut.move" = "Move in grid";
+"shortcut.open" = "Open selected app";
+"shortcut.close" = "Close GlassPad";
+"shortcut.settings" = "Open Settings";
+"shortcut.search" = "Search apps";
+
+/* Gestures */
+"settings.gestures.pinch" = "Open with four-finger pinch";
+"settings.gestures.pinch.hint" = "Pinch inward with four fingers to open, spread to close. Turning this on disables the macOS pinch launcher; a full switch-over may need a logout.";
+"settings.gestures.sensitivity" = "Pinch sensitivity";
+"settings.gestures.sensitivity.light" = "Light";
+"settings.gestures.sensitivity.firm" = "Firm";
+"settings.gestures.sensitivity.hint" = "Light: responds to subtle pinches. Firm: requires a deliberate gesture.";
+"settings.gestures.invert" = "Reverse pinch direction";
+"settings.gestures.invert.hint" = "Pinch outward to open, inward to close (opposite of default).";
+
+/* Language */
+"settings.language.label" = "Language";
+
+/* Menu */
+"menu.toggle" = "Toggle GlassPad";
+"menu.settings" = "Settings…";
+"menu.resetLayout" = "Reset Layout…";
+"menu.quit" = "Quit GlassPad";
+
+/* Common */
+"common.reset" = "Reset";
+"common.cancel" = "Cancel";
+
+/* Window */
+"window.settingsTitle" = "GlassPad Settings";
+
+/* Search / Folder / Accessibility */
+"search.placeholder" = "Search";
+"search.clearLabel" = "Clear search";
+"search.fieldLabel" = "Search apps";
+"folder.placeholder" = "Folder";
+"folder.nameLabel" = "Folder name";
+"folder.a11yLabel" = "%@ folder";
+"folder.opensHint" = "Opens the folder";
+"page.label" = "Page %d";
+"page.hint" = "Jumps to page %d";
+"app.launches" = "Launches %@";
+"statusItem.label" = "GlassPad";
+"results.empty" = "No results for “%@”";
+"apps.empty" = "No apps found";

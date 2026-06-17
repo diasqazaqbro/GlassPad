@@ -1,0 +1,74 @@
+/* Tabs */
+"tab.general" = "Основные";
+"tab.appearance" = "Оформление";
+"tab.shortcuts" = "Сочетания клавиш";
+"tab.gestures" = "Жесты";
+"tab.language" = "Язык";
+
+/* General */
+"settings.launchAtLogin" = "Запускать GlassPad при входе";
+"settings.showMenuBarIcon" = "Показывать значок в строке меню";
+"settings.menuBarIconHint" = "Выкл. → запуск только по сочетанию клавиш или жесту. Перезапустите GlassPad, чтобы снова открыть Настройки.";
+"settings.resetLayout" = "Сбросить расположение…";
+"settings.resetLayoutTitle" = "Сбросить расположение?";
+"settings.resetLayoutMessage" = "Удаляет все папки и пользовательский порядок. Приложения остаются установленными; сетка возвращается к алфавитному порядку.";
+
+/* Appearance */
+"settings.gridDensity.label" = "Плотность сетки";
+"settings.gridDensity.comfortable" = "Свободная";
+"settings.gridDensity.standard" = "Стандартная";
+"settings.gridDensity.compact" = "Компактная";
+"settings.backdropDim.label" = "Затемнение фона";
+"settings.useWallpaper.label" = "Использовать обои рабочего стола как фон";
+"settings.useWallpaper.hint" = "Захватывает экран за GlassPad (запросит разрешение на запись экрана — может потребоваться перезапуск). Выкл. → матовое стекло.";
+
+/* Shortcuts */
+"settings.shortcuts.summon" = "Открыть GlassPad:";
+"settings.shortcuts.inside" = "Внутри GlassPad:";
+"shortcut.jumpPage" = "Перейти на страницу";
+"shortcut.move" = "Перемещение по сетке";
+"shortcut.open" = "Открыть выбранное приложение";
+"shortcut.close" = "Закрыть GlassPad";
+"shortcut.settings" = "Открыть Настройки";
+"shortcut.search" = "Поиск приложений";
+
+/* Gestures */
+"settings.gestures.pinch" = "Открывать сведением четырёх пальцев";
+"settings.gestures.pinch.hint" = "Сведите четыре пальца, чтобы открыть, разведите — чтобы закрыть. Включение отключает системный лаунчер macOS; для полного переключения может понадобиться повторный вход.";
+"settings.gestures.sensitivity" = "Чувствительность сведения";
+"settings.gestures.sensitivity.light" = "Лёгкое";
+"settings.gestures.sensitivity.firm" = "Сильное";
+"settings.gestures.sensitivity.hint" = "Лёгкое: реагирует на едва заметное сведение. Сильное: требует уверенного жеста.";
+"settings.gestures.invert" = "Обратное направление сведения";
+"settings.gestures.invert.hint" = "Развести, чтобы открыть, свести — чтобы закрыть (наоборот).";
+
+/* Language */
+"settings.language.label" = "Язык";
+
+/* Menu */
+"menu.toggle" = "Показать/скрыть GlassPad";
+"menu.settings" = "Настройки…";
+"menu.resetLayout" = "Сбросить расположение…";
+"menu.quit" = "Выйти из GlassPad";
+
+/* Common */
+"common.reset" = "Сбросить";
+"common.cancel" = "Отмена";
+
+/* Window */
+"window.settingsTitle" = "Настройки GlassPad";
+
+/* Search / Folder / Accessibility */
+"search.placeholder" = "Поиск";
+"search.clearLabel" = "Очистить поиск";
+"search.fieldLabel" = "Поиск приложений";
+"folder.placeholder" = "Папка";
+"folder.nameLabel" = "Имя папки";
+"folder.a11yLabel" = "папка %@";
+"folder.opensHint" = "Открывает папку";
+"page.label" = "Страница %d";
+"page.hint" = "Переход на страницу %d";
+"app.launches" = "Запускает %@";
+"statusItem.label" = "GlassPad";
+"results.empty" = "Ничего не найдено по запросу «%@»";
+"apps.empty" = "Приложения не найдены";

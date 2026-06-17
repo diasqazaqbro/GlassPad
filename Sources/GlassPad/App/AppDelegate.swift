@@ -35,13 +35,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TrackpadPinchMonitor.shared.start(
             onPinchIn: { [weak self] in
                 guard GestureSettings.summonWithPinch else { return }
-                self?.overlay.show()
+                GestureSettings.invertPinchDirection ? self?.overlay.hide() : self?.overlay.show()
             },
             onPinchOut: { [weak self] in
                 guard GestureSettings.summonWithPinch else { return }
-                self?.overlay.hide()
+                GestureSettings.invertPinchDirection ? self?.overlay.show() : self?.overlay.hide()
             }
         )
+        TrackpadPinchMonitor.shared.setSensitivity(GestureSettings.pinchSensitivity)
+    }
+
+    /// Push a live pinch-sensitivity change to the monitor (called by Settings).
+    func applyPinchSensitivity() {
+        TrackpadPinchMonitor.shared.setSensitivity(GestureSettings.pinchSensitivity)
     }
 
     /// Dismiss the overlay when the app loses focus (the user clicked another app
@@ -62,8 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(
-            systemSymbolName: "square.grid.3x3.fill",
-            accessibilityDescription: "GlassPad"
+            systemSymbolName: "square.grid.2x2.fill",
+            accessibilityDescription: L("statusItem.label")
         )
         item.button?.image?.isTemplate = true
         item.button?.target = self
@@ -83,17 +89,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Right-click shows a transient menu; left-click toggles the overlay.
     private func presentMenu() {
         let menu = NSMenu()
-        let toggle = NSMenuItem(title: "Toggle GlassPad", action: #selector(toggleFromMenu), keyEquivalent: "")
+        let toggle = NSMenuItem(title: L("menu.toggle"), action: #selector(toggleFromMenu), keyEquivalent: "")
         toggle.target = self
         menu.addItem(toggle)
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: L("menu.settings"), action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
-        let reset = NSMenuItem(title: "Reset Layout…", action: #selector(resetLayoutFromMenu), keyEquivalent: "")
+        let reset = NSMenuItem(title: L("menu.resetLayout"), action: #selector(resetLayoutFromMenu), keyEquivalent: "")
         reset.target = self
         menu.addItem(reset)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit GlassPad", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: L("menu.quit"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
 
@@ -121,11 +127,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Destructive — confirm before discarding folders and manual ordering.
     func confirmAndResetLayout() {
         let alert = NSAlert()
-        alert.messageText = "Reset Layout to Defaults?"
-        alert.informativeText = "Removes all folders and custom ordering. Apps stay installed; the grid returns to alphabetical order."
+        alert.messageText = L("settings.resetLayoutTitle")
+        alert.informativeText = L("settings.resetLayoutMessage")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Reset")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L("common.reset"))
+        alert.addButton(withTitle: L("common.cancel"))
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
             model.resetLayout()

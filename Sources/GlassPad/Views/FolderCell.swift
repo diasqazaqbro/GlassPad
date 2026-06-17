@@ -44,8 +44,8 @@ struct FolderCell: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(reduceMotion ? nil : Metrics.pop, value: emphasized)
-        .accessibilityLabel("\(folder.name) folder")
-        .accessibilityHint("Opens the folder")
+        .accessibilityLabel(L("folder.a11yLabel", folder.name))
+        .accessibilityHint(L("folder.opensHint"))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 

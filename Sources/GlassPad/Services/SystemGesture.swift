@@ -39,6 +39,8 @@ enum SystemGesture {
 @MainActor
 enum GestureSettings {
     private static let key = "summonWithPinch"
+    private static let sensitivityKey = "pinchSensitivity"
+    private static let invertKey = "invertPinchDirection"
 
     static var summonWithPinch: Bool {
         get {
@@ -46,5 +48,20 @@ enum GestureSettings {
             return UserDefaults.standard.bool(forKey: key)
         }
         set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+
+    /// 0…1 (Light…Firm), default 0.5. Mapped to the monitor's pinch threshold.
+    static var pinchSensitivity: Double {
+        get {
+            guard UserDefaults.standard.object(forKey: sensitivityKey) != nil else { return 0.5 }
+            return UserDefaults.standard.double(forKey: sensitivityKey)
+        }
+        set { UserDefaults.standard.set(min(1, max(0, newValue)), forKey: sensitivityKey) }
+    }
+
+    /// Pinch outward to open, inward to close (opposite of the default).
+    static var invertPinchDirection: Bool {
+        get { UserDefaults.standard.bool(forKey: invertKey) }
+        set { UserDefaults.standard.set(newValue, forKey: invertKey) }
     }
 }

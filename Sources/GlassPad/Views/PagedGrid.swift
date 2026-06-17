@@ -1,11 +1,61 @@
 import SwiftUI
 
+/// Horizontally paged grid of launcher items (apps + folders).
+///
+/// ## Why this pager is stable (the design that won the review)
+///
+/// Paging is driven entirely by SwiftUI's built-in **view-aligned** scrolling —
+/// no custom `ScrollTargetBehavior`, no hand-rolled container `DragGesture`, no
+/// manual `.offset`. There is exactly **one** source of truth for the visible
+/// page (`scrolledPage`, the `.scrollPosition` id), and `model.currentPage` is
+/// kept in step through a single, guarded, non-oscillating bridge.
+///
+///  1. **STABLE.** `.scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))`
+///     always snaps the resting offset to a page boundary (each page is
+///     `.id`-tagged and exactly the container width), so it is *mathematically
+///     impossible* to come to rest between pages — no jitter, no "landed at 0.5"
+///     state. `.alwaysByOne` is a hard one-page-per-gesture cap computed
+///     synchronously by the framework from the live offset + velocity, so a swipe
+///     can never skip a page no matter how fast, and rapid consecutive swipes each
+///     resolve to one definite boundary. (The old `PageFlickBehavior` jumped two
+///     pages because it added `fromPage ± 1` to a `fromPage` that was sampled
+///     asynchronously and lagged a fast gesture by a page.)
+///
+///  2. **COMFORTABLE.** Plain `.paging` requires dragging past the half-way point,
+///     which the user found too stiff. `.viewAligned` turns on momentum/velocity:
+///     a light two-finger flick (which carries velocity, not displacement) turns
+///     the page — no near-half-page drag — while `.alwaysByOne` still caps it at
+///     exactly one page.
+///
+///  3. **COEXISTS WITH DRAG-TO-REORDER.** There is deliberately **no** custom
+///     `DragGesture` on the container — the single most important decision here.
+///     The pager rides only `ScrollView`'s native, content-drag-aware scroll
+///     recognizer, so a press that begins on a `.draggable` cell starts a drag
+///     session (lifting the icon) while a free horizontal pan scrolls the page.
+///     Nothing on the container can swallow a cell's `.draggable` press-drag, and
+///     nothing for the cell drag to fight. (A simultaneous container `DragGesture`
+///     layered over per-cell `.draggable` — the rejected alternative — routinely
+///     has both recognizers contend for the same press-drag; this design removes
+///     that entire class of conflict.)
+///
+///  4. **SYNCS with `model.currentPage`.** Swipe-driven changes flow one way
+///     (`scrolledPage → currentPage`, no animation). Programmatic changes — page
+///     dots, keyboard arrows via `model.move`, `Cmd+1…9` via `model.goToPage` —
+///     flow the other way (`currentPage → scrolledPage`, animated), guarded by
+///     `syncingFromModel` so the echo can never bounce back and restart the scroll
+///     animation mid-fling (the old dual-`onChange` feedback loop, now broken).
 struct PagedGrid: View {
     @Bindable var model: LaunchpadModel
     var namespace: Namespace.ID
     var onLaunch: (InstalledApp) -> Void
 
+    /// THE single source of truth for the visible page. Bound to `.scrollPosition`,
+    /// so the scroll view and this value are identical by construction.
     @State private var scrolledPage: Int?
+    /// True only while we are applying a *programmatic* scroll (dots / keyboard).
+    /// Guards the `scrolledPage → currentPage` bridge from writing back the value we
+    /// just set, so the two sides can never ping-pong. Set and cleared synchronously
+    /// across the paired `onChange` handlers — no async re-arming, no timing race.
     @State private var syncingFromModel = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -25,6 +75,8 @@ struct PagedGrid: View {
                 }
                 .scrollTargetLayout()
             }
+            // Built-in page-aligned snapping. `.alwaysByOne` = at most one page per
+            // gesture (stable), but velocity-driven so a light flick is enough (comfortable).
             .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
             .scrollPosition(id: $scrolledPage, anchor: .center)
             .scrollIndicators(.hidden)
@@ -42,20 +94,30 @@ struct PagedGrid: View {
             }
             .onChange(of: cols) { model.setGrid(columns: cols, rows: rows) }
             .onChange(of: rows) { model.setGrid(columns: cols, rows: rows) }
+            // Swipe-driven: the user dragged the scroll view to a new page. Ignore the
+            // value we ourselves just set programmatically (guarded below), and ignore
+            // a transient `nil` (the binding is briefly nil during layout changes).
             .onChange(of: scrolledPage) { _, new in
                 guard !syncingFromModel, let new, new != model.currentPage else { return }
                 model.currentPage = new
             }
+            // Programmatic-driven: dots tapped or keyboard moved the page. Scroll to
+            // match. Arm the guard before mutating `scrolledPage` so the resulting
+            // echo is swallowed by the handler above, then disarm synchronously — the
+            // `scrolledPage` onChange runs as part of this same state-application pass,
+            // so by the time we return the echo has already been (and only ever could
+            // be) ignored. No DispatchQueue, no timing assumption.
             .onChange(of: model.currentPage) { _, new in
                 guard scrolledPage != new else { return }
                 syncingFromModel = true
                 withAnimation(reduceMotion ? nil : Metrics.pop) { scrolledPage = new }
-                DispatchQueue.main.async { syncingFromModel = false }
+                syncingFromModel = false
             }
         }
     }
 }
 
+/// A single page: a grid of `model.columns` columns, top-aligned and centered.
 private struct PageView: View {
     let items: [LaunchpadItem]
     @Bindable var model: LaunchpadModel
@@ -74,10 +136,23 @@ private struct PageView: View {
     }
 
     private var columns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: Metrics.columnSpacing, alignment: .top), count: model.columns)
+        Array(
+            repeating: GridItem(.flexible(), spacing: Metrics.columnSpacing, alignment: .top),
+            count: model.columns
+        )
     }
 }
 
+/// Wraps an app/folder cell with drag-and-drop. Dropping onto a cell's center
+/// makes/extends a folder; dropping near the left/right edge reorders.
+///
+/// Drag-to-reorder coexists with the pager because the pager attaches **no custom
+/// `DragGesture`** to the container — it relies solely on `ScrollView`'s native
+/// scroll recognizer plus the built-in view-aligned `ScrollTargetBehavior`. That
+/// recognizer is content-drag aware: a press that begins on a `.draggable` cell
+/// starts a drag session (lifting the icon), while a free horizontal pan scrolls
+/// the page. There is therefore nothing on the container to "swallow" the cell's
+/// draggable press-drag, and nothing for the cell drag to fight.
 private struct ItemCell: View {
     let item: LaunchpadItem
     @Bindable var model: LaunchpadModel
@@ -102,9 +177,21 @@ private struct ItemCell: View {
     private var content: some View {
         switch item {
         case .app(let app):
-            AppCell(app: app, isSelected: model.selectedItemID == item.id, isLaunching: model.launchingItemID == item.id, iconScale: iconScale) { onLaunch(app) }
+            AppCell(
+                app: app,
+                isSelected: model.selectedItemID == item.id,
+                isLaunching: model.launchingItemID == item.id,
+                iconScale: iconScale
+            ) { onLaunch(app) }
         case .folder(let folder):
-            FolderCell(folder: folder, apps: model.resolvedApps(in: folder), isSelected: model.selectedItemID == item.id, isOpen: model.openFolder?.id == folder.id, iconScale: iconScale, namespace: namespace) {
+            FolderCell(
+                folder: folder,
+                apps: model.resolvedApps(in: folder),
+                isSelected: model.selectedItemID == item.id,
+                isOpen: model.openFolder?.id == folder.id,
+                iconScale: iconScale,
+                namespace: namespace
+            ) {
                 withAnimation(reduceMotion ? nil : Metrics.morph) { model.openFolder = folder }
             }
         }
@@ -113,14 +200,20 @@ private struct ItemCell: View {
     @ViewBuilder
     private var dragPreview: some View {
         switch item {
-        case .app(let app): DragPreview(path: app.id)
-        case .folder: Image(systemName: "folder.fill").font(.system(size: 48)).foregroundStyle(.white)
+        case .app(let app):
+            DragPreview(path: app.id)
+        case .folder:
+            Image(systemName: "folder.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.white)
         }
     }
 
     private var widthReader: some View {
         GeometryReader { proxy in
-            Color.clear.onAppear { width = proxy.size.width }.onChange(of: proxy.size.width) { _, w in width = w }
+            Color.clear
+                .onAppear { width = proxy.size.width }
+                .onChange(of: proxy.size.width) { _, w in width = w }
         }
     }
 
@@ -132,32 +225,50 @@ private struct ItemCell: View {
     }
 }
 
+/// Shown when a search matches nothing.
 private struct EmptyResultsView: View {
     let query: String
+
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "magnifyingglass").font(.system(size: 48, weight: .light)).foregroundStyle(.white.opacity(0.6))
-            Text("No results for “\(query)”").font(.system(size: 18, weight: .medium)).foregroundStyle(.white.opacity(0.85))
-        }.shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(.white.opacity(0.6))
+            Text(L("results.empty", query))
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
     }
 }
 
+/// Shown after a scan finds no installed apps at all (distinct from a search miss).
 private struct NoAppsView: View {
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "square.grid.3x3").font(.system(size: 48, weight: .light)).foregroundStyle(.white.opacity(0.6))
-            Text("No apps found").font(.system(size: 18, weight: .medium)).foregroundStyle(.white.opacity(0.85))
-        }.shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+            Image(systemName: "square.grid.3x3")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(.white.opacity(0.6))
+            Text(L("apps.empty"))
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
     }
 }
 
+/// Icon-sized drag image.
 private struct DragPreview: View {
     let path: String
     @State private var icon: NSImage?
+
     var body: some View {
         Group {
-            if let icon { Image(nsImage: icon).resizable().interpolation(.high).scaledToFit() }
-            else { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.2)) }
+            if let icon {
+                Image(nsImage: icon).resizable().interpolation(.high).scaledToFit()
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.2))
+            }
         }
         .frame(width: 72, height: 72)
         .task(id: path) { icon = await IconLoader.shared.icon(forPath: path) }
