@@ -9,21 +9,58 @@ import KeyboardShortcuts
 struct SettingsView: View {
     let model: LaunchpadModel
     @State private var localization = LocalizationManager.shared
+    @State private var selection: Pane? = .general
 
     var body: some View {
-        TabView {
-            GeneralTab(model: model)
-                .tabItem { Label(L("tab.general"), systemImage: "gearshape") }
-            AppearanceTab()
-                .tabItem { Label(L("tab.appearance"), systemImage: "paintbrush") }
-            ShortcutsTab()
-                .tabItem { Label(L("tab.shortcuts"), systemImage: "keyboard") }
-            GesturesTab()
-                .tabItem { Label(L("tab.gestures"), systemImage: "hand.draw") }
-            LanguageTab()
-                .tabItem { Label(L("tab.language"), systemImage: "globe") }
+        NavigationSplitView {
+            List(Pane.allCases, selection: $selection) { pane in
+                Label(L(pane.titleKey), systemImage: pane.symbol)
+                    .tag(pane)
+            }
+            .navigationSplitViewColumnWidth(min: 184, ideal: 196, max: 220)
+        } detail: {
+            detail(for: selection ?? .general)
+                .navigationTitle(L((selection ?? .general).titleKey))
         }
-        .frame(width: 520, height: 460)
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 560, minHeight: 460)
+    }
+
+    @ViewBuilder
+    private func detail(for pane: Pane) -> some View {
+        switch pane {
+        case .general: GeneralTab(model: model)
+        case .appearance: AppearanceTab()
+        case .shortcuts: ShortcutsTab()
+        case .gestures: GesturesTab()
+        case .language: LanguageTab()
+        }
+    }
+
+    /// The settings sections — a sidebar list (System Settings / iOS Settings style).
+    enum Pane: String, CaseIterable, Identifiable {
+        case general, appearance, shortcuts, gestures, language
+        var id: String { rawValue }
+
+        var titleKey: String {
+            switch self {
+            case .general: "tab.general"
+            case .appearance: "tab.appearance"
+            case .shortcuts: "tab.shortcuts"
+            case .gestures: "tab.gestures"
+            case .language: "tab.language"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .general: "gearshape"
+            case .appearance: "paintbrush"
+            case .shortcuts: "keyboard"
+            case .gestures: "hand.draw"
+            case .language: "globe"
+            }
+        }
     }
 }
 

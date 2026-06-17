@@ -15,8 +15,8 @@ final class SettingsWindowController {
     func show() {
         if window == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
-                styleMask: [.titled, .closable, .miniaturizable],
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 460),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
@@ -25,10 +25,9 @@ final class SettingsWindowController {
             window.center()
             let host = NSHostingView(rootView: SettingsView(model: model))
             window.contentView = host
-            // Fixed size: a TabView's fittingSize collapses to the smallest tab,
-            // so we size the window ourselves.
-            window.setContentSize(NSSize(width: 520, height: 460))
-            window.contentMinSize = NSSize(width: 520, height: 360)
+            // Sized for the sidebar + detail split (System Settings style).
+            window.setContentSize(NSSize(width: 600, height: 460))
+            window.contentMinSize = NSSize(width: 560, height: 420)
             self.window = window
         }
         NSApp.activate(ignoringOtherApps: true)
