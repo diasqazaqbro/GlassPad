@@ -16,24 +16,25 @@ VERSION="1.0"
 BUILD="1"
 APP="dist/${APP_NAME}.app"
 
+# Built with xcodebuild, not `swift build`: SwiftPM's Bundle.module accessor
+# only looks in the .app root (which codesign rejects) and then falls back to an
+# absolute .build path — so a `swift build` bundle crashes on any other machine.
+# Xcode's accessor looks in Contents/Resources first.
 echo "▸ Building release…"
-swift build -c release
-BIN="$(swift build -c release --show-bin-path)/${APP_NAME}"
+xcodebuild -scheme "$APP_NAME" -configuration Release \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath build -quiet build
+PRODUCTS="build/Build/Products/Release"
 
 echo "▸ Assembling ${APP}…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/${APP_NAME}"
+cp "$PRODUCTS/${APP_NAME}" "$APP/Contents/MacOS/${APP_NAME}"
 
-# Copy the SwiftPM resource bundle (localizations) so Bundle.module resolves in
-# the packaged app — without this, RU/EN strings fall back to the keys.
-RES_BUNDLE="$(swift build -c release --show-bin-path)/${APP_NAME}_${APP_NAME}.bundle"
-if [ -d "$RES_BUNDLE" ]; then
+# Resource bundles (our localizations + KeyboardShortcuts' Recorder strings).
+for RES_BUNDLE in "$PRODUCTS"/*.bundle; do
   cp -R "$RES_BUNDLE" "$APP/Contents/Resources/"
   echo "▸ Bundled resources: $(basename "$RES_BUNDLE")"
-else
-  echo "⚠︎ resource bundle not found at $RES_BUNDLE (localizations may be missing)"
-fi
+done
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
