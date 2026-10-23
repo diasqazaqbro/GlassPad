@@ -2,9 +2,9 @@ import Foundation
 import CoreGraphics
 
 /// Typed, persisted user preferences. Same shape as `GestureSettings`: a thin
-/// `UserDefaults` wrapper read at summon time. Because the overlay is rebuilt on
-/// every `show()` (and is never on screen at the same time as the Settings
-/// window), reading these at summon is enough — no `@Observable` plumbing needed.
+/// `UserDefaults` wrapper read at summon time. The overlay rebuilds its window when
+/// density or backdrop dim change (and is never on screen at the same time as the
+/// Settings window), so reading these at summon is enough — no `@Observable` plumbing.
 @MainActor
 enum AppSettings {
     /// Icon-grid density preset. Biases cell/icon size so the auto-derived column

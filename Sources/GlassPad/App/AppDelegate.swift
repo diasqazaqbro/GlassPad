@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings.show()
         }
         model.loadApps()
+        overlay.prewarm()
         HotkeyManager.register { [weak self] in self?.overlay.toggle() }
         overlay.onOpenSettings = { [weak self] in self?.settings.show() }
 

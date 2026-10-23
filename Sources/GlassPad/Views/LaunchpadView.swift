@@ -27,11 +27,13 @@ struct LaunchpadView: View {
     static let gridSpace = "gridSpace"
 
     @Bindable var model: LaunchpadModel
+    /// Dismiss after the launch pop (app launch, file open, web search).
     var onDismiss: () -> Void
+    /// Dismiss right away (click on empty space).
+    var onClose: () -> Void
     var onOpenSettings: () -> Void
 
     @FocusState private var searchFocused: Bool
-    @State private var appeared = false
     @Namespace private var glassNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -128,11 +130,9 @@ struct LaunchpadView: View {
             }
         }
         .coordinateSpace(.named(Self.gridSpace))
-        .scaleEffect(appeared ? 1 : Metrics.appearScaleFrom)
-        .onAppear {
-            model.resetTransientState()
-            withAnimation(reduceMotion ? nil : Metrics.pop) { appeared = true }
-            DispatchQueue.main.async { searchFocused = true }
+        // The window is reused across summons, so focus per summon, not onAppear.
+        .onChange(of: model.isPresented, initial: true) { _, shown in
+            if shown { DispatchQueue.main.async { searchFocused = true } }
         }
         .onChange(of: model.query) {
             model.handleQueryChange()
@@ -148,6 +148,10 @@ struct LaunchpadView: View {
         PagedGrid(model: model, namespace: glassNamespace, useLiveGlass: model.openFolder != nil) { app in
             launchAndDismiss(app)
         }
+        .equatable()
+        // Appear pop on the icons only: scaling the whole overlay re-rendered the
+        // full-screen material and every glass element on each animation frame.
+        .scaleEffect(model.isPresented ? 1 : Metrics.appearScaleFrom)
         .padding(.top, Metrics.gridTopInset)
         .padding(.bottom, Metrics.pageDotsAreaHeight)
     }
@@ -202,6 +206,6 @@ struct LaunchpadView: View {
         .contentShape(Rectangle())
         // Click empty space to dismiss (real Launchpad). When a folder is open its
         // own dim overlay sits above this and handles the tap to close the folder.
-        .onTapGesture { if model.openFolder == nil { onDismiss() } }
+        .onTapGesture { if model.openFolder == nil { onClose() } }
     }
 }

@@ -56,76 +56,107 @@ struct PagedGrid: View {
     var useLiveGlass: Bool = false
     var onLaunch: (InstalledApp) -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        // The GeometryReader only measures. Every model read lives in a child body
+        // (PagerStack / PagerOffset / PageView): reads made inside this closure were
+        // attributed to the root LaunchpadView, so each swipe re-rendered every cell.
+        GeometryReader { geo in
+            PagerStack(model: model, size: geo.size, namespace: namespace,
+                       useLiveGlass: useLiveGlass, onLaunch: onLaunch)
+        }
+    }
+}
+
+/// Ignores `onLaunch`: a fresh closure never compares equal, so without this every
+/// LaunchpadView re-render (summon, focus, search toggle) re-rendered every cell. Safe
+/// because the grid's own model reads still invalidate it directly.
+extension PagedGrid: @MainActor Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.model === rhs.model && lhs.namespace == rhs.namespace && lhs.useLiveGlass == rhs.useLiveGlass
+    }
+}
+
+private struct PagerStack: View {
+    @Bindable var model: LaunchpadModel
+    let size: CGSize
+    var namespace: Namespace.ID
+    var useLiveGlass: Bool
+    var onLaunch: (InstalledApp) -> Void
 
     var body: some View {
-        GeometryReader { geo in
-            let scale = AppSettings.gridDensity.scale
-            let cols = Metrics.columnCount(forWidth: geo.size.width, scale: scale)
-            let rows = Metrics.rowCount(forHeight: geo.size.height, scale: scale)
-            let pageWidth = geo.size.width
+        let scale = AppSettings.gridDensity.scale
+        let cols = Metrics.columnCount(forWidth: size.width, scale: scale)
+        let rows = Metrics.rowCount(forHeight: size.height, scale: scale)
+        let pageWidth = size.width
 
-            // The resting offset for the current page, plus the live swipe
-            // translation the scroll monitor publishes. While the gesture is live,
-            // `dragTranslation` follows the finger; on release the monitor zeroes it
-            // and (maybe) advances `currentPage`, so the rest position springs to the
-            // new page. One `.offset(x:)` for the whole eager stack.
-            let restOffset = -CGFloat(model.currentPage) * pageWidth
-            let liveOffset = restOffset + model.dragTranslation
-
-            // EAGER HStack (not Lazy): every page + its cells are built up front, so a
-            // swipe never realizes a page's ~35 cells mid-flip — that just-in-time
-            // realization was the original scroll hitch. The page count is small and
-            // bounded; the one-time build at appear is cheap (icons load async,
-            // cached) and off-screen pages are clipped, so eager realization adds no
-            // per-frame draw cost. A flip just composites ready layers.
-            HStack(spacing: 0) {
-                ForEach(model.pages.indices, id: \.self) { index in
-                    PageView(
-                        items: model.pages[index],
-                        model: model,
-                        namespace: namespace,
-                        iconScale: scale,
-                        useLiveGlass: useLiveGlass,
-                        onLaunch: onLaunch
-                    )
-                    .frame(width: pageWidth)
-                }
+        // EAGER HStack (not Lazy): every page + its cells are built up front, so a
+        // swipe never realizes a page's ~35 cells mid-flip — that just-in-time
+        // realization was the original scroll hitch. The page count is small and
+        // bounded; the one-time build is cheap (icons load async, cached) and
+        // off-screen pages are clipped, so eager realization adds no per-frame draw
+        // cost. A flip just composites ready layers.
+        HStack(spacing: 0) {
+            ForEach(model.pages.indices, id: \.self) { index in
+                PageView(
+                    items: model.pages[index],
+                    model: model,
+                    size: CGSize(width: pageWidth, height: size.height),
+                    namespace: namespace,
+                    iconScale: scale,
+                    useLiveGlass: useLiveGlass,
+                    onLaunch: onLaunch
+                )
+                .frame(width: pageWidth)
             }
-            // Anchor the stack's leading edge to the container's leading edge, then
-            // slide it. (`.leading` keeps page 0 at x=0 so `-page * width` is exact.)
-            .frame(width: pageWidth, alignment: .leading)
-            .offset(x: liveOffset)
-            // Animate ONLY the resting page change (commit / dots / keyboard). The
-            // live finger-follow updates `dragTranslation` while `isPaging` is true,
-            // and we suppress the spring then so the stack tracks the finger 1:1
-            // without a spring lagging behind. The commit zeroes `dragTranslation`
-            // and clears `isPaging`, re-enabling the spring to the resting page.
-            .animation(reduceMotion || model.isPaging ? nil : Metrics.pageSpring,
-                       value: model.currentPage)
-            .animation(reduceMotion || model.isPaging ? nil : Metrics.pageSpring,
-                       value: model.dragTranslation)
-            // Clip off-screen pages so neighbors never draw outside the container.
-            .frame(width: pageWidth, height: geo.size.height, alignment: .leading)
-            .clipped()
-            .overlay {
-                // Search results live in their own SearchResultsView (LaunchpadView
-                // swaps this whole grid out while searching), so here we only need the
-                // at-rest "no apps installed" empty state.
-                if !model.searching && model.didLoad && model.displayedItems.isEmpty {
-                    NoAppsView()
-                }
-            }
-            // Publish the page width so the scroll monitor (in the controller) can do
-            // its commit-fraction + rubber-band math in real units.
-            .onAppear {
-                model.setGrid(columns: cols, rows: rows)
-                model.pageWidth = pageWidth
-            }
-            .onChange(of: pageWidth) { _, w in model.pageWidth = w }
-            .onChange(of: cols) { model.setGrid(columns: cols, rows: rows) }
-            .onChange(of: rows) { model.setGrid(columns: cols, rows: rows) }
         }
+        // Anchor the stack's leading edge to the container's leading edge, then
+        // slide it. (`.leading` keeps page 0 at x=0 so `-page * width` is exact.)
+        .frame(width: pageWidth, alignment: .leading)
+        .modifier(PagerOffset(model: model, pageWidth: pageWidth))
+        // Clip off-screen pages so neighbors never draw outside the container.
+        .frame(width: pageWidth, height: size.height, alignment: .leading)
+        .clipped()
+        .overlay {
+            // Search results live in their own SearchResultsView (LaunchpadView
+            // swaps this whole grid out while searching), so here we only need the
+            // at-rest "no apps installed" empty state.
+            if !model.searching && model.didLoad && model.displayedItems.isEmpty {
+                NoAppsView()
+            }
+        }
+        // Publish the page width so the scroll monitor (in the controller) can do
+        // its commit-fraction + rubber-band math in real units.
+        .onAppear {
+            model.setGrid(columns: cols, rows: rows)
+            model.pageWidth = pageWidth
+        }
+        .onChange(of: pageWidth) { _, w in model.pageWidth = w }
+        .onChange(of: cols) { model.setGrid(columns: cols, rows: rows) }
+        .onChange(of: rows) { model.setGrid(columns: cols, rows: rows) }
+    }
+}
+
+/// Slides the page stack: the resting offset `-currentPage * pageWidth` plus the live
+/// swipe translation the scroll monitor publishes. A modifier on purpose — these
+/// change every swipe frame, and only this body re-evaluates; `content` (every page
+/// and cell) does not.
+private struct PagerOffset: ViewModifier {
+    let model: LaunchpadModel
+    let pageWidth: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        // Animate ONLY the resting page change (commit / dots / keyboard). The live
+        // finger-follow updates `dragTranslation` while `isPaging` is true, and we
+        // suppress the spring then so the stack tracks the finger 1:1 without a
+        // spring lagging behind. The commit zeroes `dragTranslation` and clears
+        // `isPaging`, re-enabling the spring to the resting page.
+        let spring = reduceMotion || model.isPaging ? nil : Metrics.pageSpring
+        content
+            .offset(x: -CGFloat(model.currentPage) * pageWidth + model.dragTranslation)
+            .animation(spring, value: model.currentPage)
+            .animation(spring, value: model.dragTranslation)
     }
 }
 
@@ -148,6 +179,7 @@ struct PagedGrid: View {
 private struct PageView: View {
     let items: [LaunchpadItem]
     @Bindable var model: LaunchpadModel
+    let size: CGSize
     var namespace: Namespace.ID
     var iconScale: CGFloat
     var useLiveGlass: Bool
@@ -156,34 +188,38 @@ private struct PageView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        GeometryReader { geo in
-            let cols = max(1, model.columns)
-            let margin = Metrics.gridHorizontalMargin
-            // Equal-share column pitch — cells used to be `.frame(maxWidth:.infinity)`
-            // inside a margin, so each column's share is (usable − gaps)/cols.
-            let cellW = (geo.size.width - margin * 2 - CGFloat(cols - 1) * Metrics.columnSpacing) / CGFloat(cols)
-            let pitchX = cellW + Metrics.columnSpacing
-            let rowPitch = (Metrics.cellHeight + Metrics.rowSpacing) * iconScale
+        let cols = max(1, model.columns)
+        let margin = Metrics.gridHorizontalMargin
+        // Equal-share column pitch — cells used to be `.frame(maxWidth:.infinity)`
+        // inside a margin, so each column's share is (usable − gaps)/cols.
+        let cellW = (size.width - margin * 2 - CGFloat(cols - 1) * Metrics.columnSpacing) / CGFloat(cols)
+        let pitchX = cellW + Metrics.columnSpacing
+        let rowPitch = (Metrics.cellHeight + Metrics.rowSpacing) * iconScale
 
-            ZStack(alignment: .topLeading) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    let col = index % cols
-                    let row = index / cols
-                    ItemCell(item: item, model: model, namespace: namespace,
-                             iconScale: iconScale, useLiveGlass: useLiveGlass, onLaunch: onLaunch)
-                        .frame(width: cellW, height: rowPitch)
-                        .position(x: margin + CGFloat(col) * pitchX + cellW / 2,
-                                  y: rowPitch * (CGFloat(row) + 0.5))
-                        // The lifted item is invisible in-grid (its gap) — the floating
-                        // DragFloater in LaunchpadView shows the real icon at the cursor.
-                        .opacity(model.draggingItemID == item.id ? 0 : 1)
-                }
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                let col = index % cols
+                let row = index / cols
+                // Per-cell flags are read here, not inside ItemCell, so an arrow key
+                // re-renders only the cells whose flag flipped, not every cell.
+                ItemCell(item: item, model: model, namespace: namespace,
+                         iconScale: iconScale, useLiveGlass: useLiveGlass,
+                         isSelected: model.selectedItemID == item.id,
+                         isLaunching: model.launchingItemID == item.id,
+                         isFolderTarget: model.folderTargetID == item.id,
+                         onLaunch: onLaunch)
+                    .frame(width: cellW, height: rowPitch)
+                    .position(x: margin + CGFloat(col) * pitchX + cellW / 2,
+                              y: rowPitch * (CGFloat(row) + 0.5))
+                    // The lifted item is invisible in-grid (its gap) — the floating
+                    // DragFloater in LaunchpadView shows the real icon at the cursor.
+                    .opacity(model.draggingItemID == item.id ? 0 : 1)
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-            // Animate slot changes ONLY when a live drag bumps the revision — never on
-            // currentPage (that's the outer offset spring) and never on plain reloads.
-            .animation(reduceMotion ? nil : Metrics.reorderSpring, value: model.reorderRevision)
         }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        // Animate slot changes ONLY when a live drag bumps the revision — never on
+        // currentPage (that's the outer offset spring) and never on plain reloads.
+        .animation(reduceMotion ? nil : Metrics.reorderSpring, value: model.reorderRevision)
     }
 }
 
@@ -203,6 +239,9 @@ private struct ItemCell: View {
     var namespace: Namespace.ID
     var iconScale: CGFloat
     var useLiveGlass: Bool
+    var isSelected: Bool
+    var isLaunching: Bool
+    var isFolderTarget: Bool
     var onLaunch: (InstalledApp) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -210,7 +249,7 @@ private struct ItemCell: View {
     var body: some View {
         content
             .overlay {
-                if model.folderTargetID == item.id {
+                if isFolderTarget {
                     RoundedRectangle(cornerRadius: Metrics.cellCornerRadius, style: .continuous)
                         .fill(.white.opacity(Metrics.folderTargetHighlightOpacity))
                         .allowsHitTesting(false)
@@ -236,15 +275,15 @@ private struct ItemCell: View {
         case .app(let app):
             AppCell(
                 app: app,
-                isSelected: model.selectedItemID == item.id,
-                isLaunching: model.launchingItemID == item.id,
+                isSelected: isSelected,
+                isLaunching: isLaunching,
                 iconScale: iconScale
             ) { onLaunch(app) }
         case .folder(let folder):
             FolderCell(
                 folder: folder,
                 apps: model.resolvedApps(in: folder),
-                isSelected: model.selectedItemID == item.id,
+                isSelected: isSelected,
                 isOpen: model.openFolder?.id == folder.id,
                 iconScale: iconScale,
                 namespace: namespace,

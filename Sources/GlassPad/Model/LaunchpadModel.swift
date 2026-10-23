@@ -32,6 +32,10 @@ final class LaunchpadModel {
     /// The item id currently "popping" as it launches (for the launch animation).
     var launchingItemID: String?
 
+    /// True while the overlay is on screen. The window is reused across summons, so
+    /// per-summon view work (appear pop, search focus) keys off this, not onAppear.
+    var isPresented = false
+
     /// Keyboard selection tracked by **identity**, so it survives reorders,
     /// folder edits, and live re-scans instead of silently pointing at whatever
     /// app now occupies a stale index.
@@ -207,6 +211,11 @@ final class LaunchpadModel {
 
             self.apps = discovered
             self.appsByID = Dictionary(discovered.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            // Warm the icon cache in the background so the first summon draws real
+            // icons at once (cache hits on later re-scans make this free).
+            Task {
+                for app in discovered { _ = await IconLoader.shared.icon(forPath: app.id) }
+            }
 
             switch outcome {
             case .loaded(let stored):

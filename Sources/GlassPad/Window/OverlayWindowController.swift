@@ -6,7 +6,11 @@ import SwiftUI
 @MainActor
 final class OverlayWindowController {
     private let model: LaunchpadModel
+    /// Built once and reused: rebuilding the window and its whole SwiftUI tree (every
+    /// page and cell) on each show() froze the main thread ~100 ms per summon.
     private var window: KeyableWindow?
+    /// The non-observed settings the current window was built with (see preparedWindow).
+    private var windowSettingsKey = ""
     private var keyMonitor: Any?
     private var scrollMonitor: Any?
     private(set) var isVisible = false
@@ -41,21 +45,16 @@ final class OverlayWindowController {
 
     func show() {
         guard !isVisible else { return }
+        // Bumping the generation also cancels a still-running hide() fade: its
+        // completion sees a newer generation and leaves the window up.
         generation += 1
-        // A previous hide()'s fade-out may still be in flight; drop that window
-        // immediately so we never end up with two overlays (its completion handler
-        // is guarded by identity and won't touch the new window).
-        if let stale = window {
-            stale.orderOut(nil)
-            window = nil
-        }
         let screen = targetScreen()
-        let window = makeWindow(on: screen)
-        self.window = window
+        let window = preparedWindow(on: screen)
 
-        window.alphaValue = 0
+        if !window.isVisible { window.alphaValue = 0 }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        withAnimation(Metrics.reduceMotion ? nil : Metrics.pop) { model.isPresented = true }
 
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = Metrics.reduceMotion ? 0 : Metrics.overlayFadeIn
@@ -109,6 +108,7 @@ final class OverlayWindowController {
         isVisible = false
         removeKeyMonitor()
         removeScrollMonitor()
+        let gen = generation
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Metrics.reduceMotion ? 0 : Metrics.overlayFadeOut
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -116,10 +116,18 @@ final class OverlayWindowController {
         }, completionHandler: { [weak self] in
             // NSAnimationContext invokes completion handlers on the main thread.
             MainActor.assumeIsolated {
+                // A re-summon during the fade-out owns the window now.
+                guard let self, self.generation == gen else { return }
                 window.orderOut(nil)
-                // Only clear the reference if this is still the current window — a
-                // re-summon during the fade-out may have installed a new one.
-                if self?.window === window { self?.window = nil }
+                // Reset while hidden so the next summon opens clean with nothing left
+                // to re-render. No implicit animations: the pager would otherwise
+                // visibly slide back to page 0 on the next open.
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    self.model.isPresented = false
+                    self.model.resetTransientState()
+                }
             }
         })
     }
@@ -133,6 +141,27 @@ final class OverlayWindowController {
         return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
             ?? NSScreen.main
             ?? NSScreen.screens[0]
+    }
+
+    /// Build and lay out the window ahead of the first summon, so the first open
+    /// doesn't pay for constructing every page and cell.
+    func prewarm() {
+        preparedWindow(on: targetScreen()).contentView?.layoutSubtreeIfNeeded()
+    }
+
+    /// The cached window, moved to `screen`. Rebuilt only when a setting the views
+    /// read at render time (not observed) has changed since it was built.
+    private func preparedWindow(on screen: NSScreen) -> KeyableWindow {
+        let key = "\(AppSettings.gridDensity.rawValue)|\(AppSettings.backdropDim)"
+        if let window, key == windowSettingsKey {
+            if window.frame != screen.frame { window.setFrame(screen.frame, display: false) }
+            return window
+        }
+        window?.orderOut(nil)
+        let fresh = makeWindow(on: screen)
+        window = fresh
+        windowSettingsKey = key
+        return fresh
     }
 
     private func makeWindow(on screen: NSScreen) -> KeyableWindow {
@@ -153,6 +182,7 @@ final class OverlayWindowController {
         let root = LaunchpadView(
             model: model,
             onDismiss: { [weak self] in self?.scheduleLaunchHide() },
+            onClose: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in self?.openSettingsAndHide() }
         )
         let host = NSHostingView(rootView: root)
