@@ -12,8 +12,8 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="GlassPad"
 BUNDLE_ID="com.glasspad.GlassPad"
-VERSION="1.0"
-BUILD="1"
+VERSION="1.0.1"
+BUILD="2"
 APP="dist/${APP_NAME}.app"
 
 # Built with xcodebuild, not `swift build`: SwiftPM's Bundle.module accessor
